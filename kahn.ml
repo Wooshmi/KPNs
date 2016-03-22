@@ -133,8 +133,10 @@ module Pipes: S = struct
     let ths = List.map
       (fun f ->
         let pid = Unix.fork () in
-        if pid = 0 then
+        if pid = 0 then (
           f ();
+          exit 0;
+        );
         pid) l in
     List.iter (fun pid -> let _ = Unix.waitpid [] pid in ()) ths
 
