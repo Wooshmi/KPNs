@@ -116,8 +116,7 @@ module Pipes: S = struct
   let put v c () =
     let v' = Marshal.to_bytes v [Marshal.Closures; Marshal.Compat_32] in
     let _ = Unix.write c.in_fd (bytes_of_int (Bytes.length v')) 0 prefixLength in
-    let _ = Unix.write c.in_fd v' 0 (Bytes.length v') in
-    Thread.yield ()
+    let _ = Unix.write c.in_fd v' 0 (Bytes.length v') in ()
 
   let rec get c () =
     try
