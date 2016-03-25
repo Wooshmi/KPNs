@@ -147,3 +147,40 @@ module Pipes: S = struct
 
   let run e = e ()
 end
+
+module Seq: S = struct
+  type 'a process = ('a -> unit) -> unit
+
+  type 'a channel = { q: 'a Queue.t ; m: Mutex.t; }
+  type 'a in_port = 'a channel
+  type 'a out_port = 'a channel
+
+  let new_channel () =
+    let q = { q = Queue.create (); m = Mutex.create (); } in
+    q, q
+
+  let put v c () =
+    Mutex.lock c.m;
+    Queue.push v c.q;
+    Mutex.unlock c.m;
+
+  let rec get c () =
+    try
+      Mutex.lock c.m;
+      let v = Queue.pop c.q in
+      Mutex.unlock c.m;
+      v
+    with Queue.Empty ->
+      Mutex.unlock c.m;
+      get c ()
+
+  let doco l () =
+    let ths = List.map (fun f -> Thread.create f ()) l in
+    List.iter (fun th -> Thread.join th) ths
+
+  let return v = (fun c -> c v)
+
+  let bind e e' = (fun c -> e (fun a -> e' a c))
+
+  let run e = e (fun _ -> ())
+end
