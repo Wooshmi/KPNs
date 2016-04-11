@@ -156,16 +156,21 @@ module Seq: S = struct
 
   (* Queue for the processes *)
   let proc_q = Queue.create ()
+  let sch_state = ref false
 
   (* Not the most elegant solution *)
   let hide v = Obj.magic v  (* Let me show you a magic trick... *)
 
   let rec scheduler () =
-    try
-      let p, param = Queue.pop proc_q in
-      p param;
-      scheduler ()
-    with Queue.Empty -> ()
+    if !sch_state then (* No more than one scheduler "running" at a time *)
+      ()
+    else begin
+      sch_state := true;
+      while not (Queue.is_empty proc_q) do
+        let p, param = Queue.pop proc_q in p param
+      done;
+      sch_state := false
+    end
 
   let new_channel () =
     let c = Queue.create () in
@@ -191,13 +196,10 @@ module Seq: S = struct
     | Some x -> x
 
   let rec get c f =
-    try
-      let v = Queue.pop c in
-      Queue.push (hide f, hide v) proc_q;
-      scheduler ()
-    with Queue.Empty ->
-      Queue.push (hide (get c), hide f) proc_q;
-      scheduler ()
+    if not (Queue.is_empty c) then
+      let v = Queue.pop c in Queue.push (hide f, hide v) proc_q
+    else Queue.push (hide (get c), hide f) proc_q;
+    scheduler ()
 
   let doco l f =
     List.iter (fun p -> Queue.add (hide p, hide ()) proc_q) l;
