@@ -17,10 +17,10 @@ module Example (K : Kahn.S) = struct
 
   let main : unit K.process =
     (delay K.new_channel ()) >>=
-    (fun (q_in, q_out) -> K.doco [ integers q_out ; output q_in ; ])
+    (fun (q_in, q_out) -> K.doco [integers q_out; output q_in])
 
 end
 
-module E = Example(Kahn.Pipes)
+module E = Example(Kahn.Seq)
 
-let () = E.K.run E.main
+let () = print_endline "START"; E.K.run E.main

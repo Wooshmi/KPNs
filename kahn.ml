@@ -42,7 +42,6 @@ module Lib (K : S) = struct
     let qi, qo = K.new_channel () in
     K.run
       ((K.doco ((collect ports [] qo) :: workers)) >>= (fun _ -> K.get qi))
-
 end
 
 
@@ -54,8 +53,8 @@ module Th: S = struct
   type 'a out_port = 'a channel
 
   let new_channel () =
-    let q = { q = Queue.create (); m = Mutex.create (); } in
-    q, q
+    let c = {q = Queue.create (); m = Mutex.create ()} in
+    c, c
 
   let put v c () =
     Mutex.lock c.m;
@@ -78,7 +77,7 @@ module Th: S = struct
     let ths = List.map (fun f -> Thread.create f ()) l in
     List.iter (fun th -> Thread.join th) ths
 
-  let return v = (fun () -> v)
+  let return v () = v
 
   let bind e e' () =
     let v = e () in
@@ -114,7 +113,7 @@ module Pipes: S = struct
     q, q
 
   let put v c () =
-    let v' = Marshal.to_bytes v [Marshal.Closures; Marshal.Compat_32] in
+    let v' = Marshal.to_bytes v [Marshal.Closures] in
     let _ = Unix.write c.in_fd (bytes_of_int (Bytes.length v')) 0 prefixLength in
     let _ = Unix.write c.in_fd v' 0 (Bytes.length v') in ()
 
@@ -139,7 +138,7 @@ module Pipes: S = struct
         pid) l in
     List.iter (fun pid -> let _ = Unix.waitpid [] pid in ()) ths
 
-  let return v = (fun () -> v)
+  let return v () = v
 
   let bind e e' () =
     let v = e () in
@@ -149,38 +148,58 @@ module Pipes: S = struct
 end
 
 module Seq: S = struct
-  type 'a process = ('a -> unit) -> unit
+  type 'a process = (('a -> unit) -> unit)
 
-  type 'a channel = { q: 'a Queue.t ; m: Mutex.t; }
+  type 'a channel = 'a Queue.t
   type 'a in_port = 'a channel
   type 'a out_port = 'a channel
 
-  let new_channel () =
-    let q = { q = Queue.create (); m = Mutex.create (); } in
-    q, q
+  (* Queue for the processes *)
+  let proc_q = Queue.create ()
 
-  let put v c () =
-    Mutex.lock c.m;
-    Queue.push v c.q;
-    Mutex.unlock c.m;
+  (* Not the most elegant solution *)
+  let hide v = Obj.magic v  (* Let me show you a magic trick... *)
 
-  let rec get c () =
+  let rec scheduler () =
     try
-      Mutex.lock c.m;
-      let v = Queue.pop c.q in
-      Mutex.unlock c.m;
-      v
+      let p, param = Queue.pop proc_q in
+      p param;
+      scheduler ()
+    with Queue.Empty -> ()
+
+  let new_channel () =
+    let c = Queue.create () in
+    c, c
+
+  let rec put v c f =
+    Queue.push v c;
+    Queue.push (hide f, hide ()) proc_q;
+    scheduler ()
+
+  let return v f =
+    Queue.push (hide f, hide v) proc_q;
+    scheduler ()
+
+  let rec bind e e' f =
+    e (fun f' -> Queue.push (hide (e' f'), hide f) proc_q; scheduler ())
+
+  let run e =
+    let res = ref None in
+    bind e (fun x -> res := Some x; (fun f -> f ())) (fun () -> ());
+    match !res with
+    | None -> assert false
+    | Some x -> x
+
+  let rec get c f =
+    try
+      let v = Queue.pop c in
+      Queue.push (hide f, hide v) proc_q;
+      scheduler ()
     with Queue.Empty ->
-      Mutex.unlock c.m;
-      get c ()
+      Queue.push (hide (get c), hide f) proc_q;
+      scheduler ()
 
-  let doco l () =
-    let ths = List.map (fun f -> Thread.create f ()) l in
-    List.iter (fun th -> Thread.join th) ths
-
-  let return v = (fun c -> c v)
-
-  let bind e e' = (fun c -> e (fun a -> e' a c))
-
-  let run e = e (fun _ -> ())
+  let doco l f =
+    List.iter (fun p -> Queue.add (hide p, hide ()) proc_q) l;
+    scheduler ()
 end
