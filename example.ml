@@ -23,4 +23,4 @@ end
 
 module E = Example(Kahn.Seq)
 
-let () = print_endline "START"; E.K.run E.main
+let () = E.K.run E.main

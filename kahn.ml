@@ -90,7 +90,7 @@ end
 module Pipes: S = struct
   type 'a process = (unit -> 'a)
 
-  type 'a channel = { in_fd : Unix.file_descr ; out_fd : Unix.file_descr }
+  type 'a channel = { in_ch : Pervasives.in_channel ; out_ch : Pervasives.out_channel }
   type 'a in_port = 'a channel
   type 'a out_port = 'a channel
 
@@ -108,24 +108,15 @@ module Pipes: S = struct
     !ans
 
   let new_channel () =
-    let out_fd, in_fd = Unix.pipe () in
-    let q = { in_fd = in_fd; out_fd = out_fd } in
+    let in_fd, out_fd = Unix.pipe () in
+    let q = { in_ch = Unix.in_channel_of_descr in_fd; out_ch = Unix.out_channel_of_descr out_fd } in
     q, q
 
   let put v c () =
-    let v' = Marshal.to_bytes v [Marshal.Closures] in
-    let _ = Unix.write c.in_fd (bytes_of_int (Bytes.length v')) 0 prefixLength in
-    let _ = Unix.write c.in_fd v' 0 (Bytes.length v') in ()
+    Marshal.to_channel c.out_ch v [Marshal.Closures]
 
   let rec get c () =
-    try
-      let b = Bytes.create prefixLength in
-      let _ = Unix.read c.out_fd b 0 prefixLength in
-      let length = int_of_bytes b in
-      let b' = Bytes.create length in
-      let _ = Unix.read c.out_fd b' 0 length in
-      Marshal.from_bytes b' 0
-    with Unix.Unix_error (Unix.EBADF, _, _) -> get c ()
+    Marshal.from_channel c.in_ch
 
   let doco l () =
     let ths = List.map
@@ -159,7 +150,7 @@ module Seq: S = struct
   let sch_state = ref false
 
   (* Not the most elegant solution *)
-  let hide v = Obj.magic v  (* Let me show you a magic trick... *)
+  let morph v = Obj.magic v (* Let me show you a magic trick... *)
 
   let rec scheduler () =
     if !sch_state then (* No more than one scheduler "running" at a time *)
@@ -178,15 +169,15 @@ module Seq: S = struct
 
   let rec put v c f =
     Queue.push v c;
-    Queue.push (hide f, hide ()) proc_q;
+    Queue.push (morph f, morph ()) proc_q;
     scheduler ()
 
   let return v f =
-    Queue.push (hide f, hide v) proc_q;
+    Queue.push (morph f, morph v) proc_q;
     scheduler ()
 
   let rec bind e e' f =
-    e (fun f' -> Queue.push (hide (e' f'), hide f) proc_q; scheduler ())
+    e (fun f' -> Queue.push (morph (e' f'), morph f) proc_q; scheduler ())
 
   let run e =
     let res = ref None in
@@ -197,11 +188,11 @@ module Seq: S = struct
 
   let rec get c f =
     if not (Queue.is_empty c) then
-      let v = Queue.pop c in Queue.push (hide f, hide v) proc_q
-    else Queue.push (hide (get c), hide f) proc_q;
+      let v = Queue.pop c in Queue.push (morph f, morph v) proc_q
+    else Queue.push (morph (get c), morph f) proc_q;
     scheduler ()
 
   let doco l f =
-    List.iter (fun p -> Queue.add (hide p, hide ()) proc_q) l;
+    List.iter (fun p -> Queue.add (morph p, morph ()) proc_q) l;
     scheduler ()
 end
