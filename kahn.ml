@@ -206,79 +206,201 @@ module Net: S = struct
 
   type 'a query =
     | NewChannel
-    | Doco of unit process list
-    | Finished of 'a
-
-  let _ = Unix.putenv "SERVER" "FALSE"
-
+    | Doco of int * unit process list
+    | Finished of int * 'a
+  
+  let _ = Random.self_init ()
   let comport = 42
-  let currport = ref 1 lsl 15
-  let clientip = '129.199.100.19'
-  let servers = ['127.0.0.1']
+  let currport = ref (1 lsl 15)
+  let clientip = "129.199.100.19"
+  let servers = Array.map 
+    (fun x -> 
+      let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+      Unix.(connect fd (ADDR_INET (inet_addr_of_string x, comport)));
+      Unix.out_channel_of_descr fd)
+    [|"127.0.0.1"|]
+  let currsrv = ref 0
+  let currsrv_lock = Mutex.create ()
+  let connected = Array.make (1 lsl 15) []
+  let docopid = ref 0
+  let docopid_lock = Mutex.create ()
+  let docopid_status = Hashtbl.create 1000
+  let children_pids = Queue.create ()
 
   let opt_get = function
-    | None -> raise Not_Found
+    | None -> raise Not_found
     | Some x -> x
+
+  let get_port addr =
+    match addr with
+    | Unix.ADDR_INET (_, p) -> p
+    | _ -> assert false
+
+  let read_and_broadcast fd =
+    let in_ch = Unix.in_channel_of_descr fd in
+    let rec broadcast v l = begin
+      match l with
+      | [] -> ()
+      | out_ch :: l' -> Marshal.(to_channel out_ch v [Closures]); broadcast v l'
+    end in
+    while true do
+      let v = Marshal.from_channel in_ch in
+      let port = get_port (Unix.getsockname fd) in
+      broadcast v connected.(port - (1 lsl 15));
+    done
+
+  let process_port addr = 
+    let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+    let port = get_port addr in
+    Unix.bind fd addr;
+    Unix.listen fd 100;
+    while true do
+      let fd', _ = Unix.accept fd in
+      connected.(port - (1 lsl 15)) <- (Unix.out_channel_of_descr fd') :: connected.(port - (1 lsl 15));
+      let pid = Unix.fork () in
+      if pid = 0 then begin
+        read_and_broadcast fd';
+        exit 0;
+      end else
+        Queue.push pid children_pids;
+    done
 
   let new_channel () =
     if Unix.getenv "SERVER" = "FALSE" then
         let addr = Unix.(ADDR_INET ((inet_addr_of_string clientip), !currport)) in
         incr currport;
-        if Unix.fork () = 0 then begin
+        let pid = Unix.fork () in
+        if pid = 0 then begin
           process_port addr;
           exit 0;
-        end else
+        end else begin
+          Queue.push pid children_pids;
           { addr = addr; in_ch = None }, { addr = addr; out_ch = None }
+        end
     else begin
-        let fd = Unix.(socket PFINET SOCK_STREAM 0) in
+        let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
         Unix.(connect fd (ADDR_INET ((inet_addr_of_string clientip), comport)));
         let out_ch = Unix.out_channel_of_descr fd in
         Marshal.to_channel out_ch NewChannel [];
         let in_ch = Unix.in_channel_of_descr fd in
         Marshal.from_channel in_ch
     end
+  
+  let distribute l =
+    let docopids = Queue.create () in
+    List.iteri 
+      (fun pos x ->
+        Mutex.lock docopid_lock;
+        Mutex.lock currsrv_lock;
+        Marshal.(to_channel servers.(!currsrv) (!docopid, x) [Closures]);
+        Queue.push !docopid docopids;
+        incr docopid;
+        incr currsrv;
+        if !currsrv = Array.length servers then
+          currsrv := 0;
+        Mutex.unlock docopid_lock;
+        Mutex.unlock currsrv_lock;
+      )
+      l;
+    while not (Queue.is_empty docopids) do
+      let x = Queue.pop docopids in
+      if Hashtbl.mem docopid_status x then
+        ()
+      else
+        Queue.push x docopids
+    done
+
+  let assign x =
+    Mutex.lock docopid_lock;
+    Mutex.lock currsrv_lock;
+    let currdocopid = !docopid in
+    Marshal.(to_channel servers.(!currsrv) (!docopid, x) [Closures]);
+    incr docopid;
+    incr currsrv;
+    if !currsrv = Array.length servers then
+      currsrv := 0;
+    Mutex.unlock docopid_lock;
+    Mutex.unlock currsrv_lock;
+    while not (Hashtbl.mem docopid_status currdocopid) do
+      ()
+    done;
+    Marshal.from_string (Hashtbl.find docopid_status currdocopid) 0
+
+  let kill_all_children () =
+    Queue.iter (fun pid -> Unix.kill pid 9) children_pids;
+    Queue.clear children_pids
 
   let rec put v p () =
     if p.out_ch = None then begin
-      let fd = Unix.(socket PFINET SOCK_STREAM 0) in
+      let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
       Unix.connect fd p.addr;
       let out_ch = Unix.out_channel_of_descr fd in
       p.out_ch <- Some out_ch
-    end
-      Marshal.to_channel (opt_get p.out_ch) v [Clotures];
+    end;
+    Marshal.(to_channel (opt_get p.out_ch) v [Closures])
 
   let return v () = v
 
-  let rec bind e e' () =
+  let bind e e' () =
     let v = e () in
     e' v ()
 
   let run e =
-    if Unix.getenv "SERVER" = "FALSE" then
-        distribute [e]
-    else
-        e ()
+    if Unix.getenv "SERVER" = "FALSE" then begin
+      let v = assign e in
+      kill_all_children ();
+      v
+    end else
+      e ()
 
   let rec get p () =
     if p.in_ch = None then begin
-      let fd = Unix.(socket PFINET SOCK_STREAM 0) in
+      let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
       Unix.connect fd p.addr;
       let in_ch = Unix.in_channel_of_descr fd in
       p.in_ch <- Some in_ch
-    end
-      Marshal.from_channel (opt_get p.in_ch);
+    end;
+    Marshal.from_channel (opt_get p.in_ch)
 
   let doco l () =
     if Unix.getenv "SERVER" = "FALSE" then
-        distribute l
+      distribute l
     else begin
-      let fd = Unix.(socket PFINET SOCK_STREAM 0) in
+      let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
       Unix.(connect fd (ADDR_INET ((inet_addr_of_string clientip), comport)));
       let out_ch = Unix.out_channel_of_descr fd in
-      Marshal.to_channel out_ch (Doco l) [Closures];
+      Marshal.(to_channel out_ch (Doco (Random.int (1 lsl 30 - 1), l)) [Closures]); (* Docos should be counted *)
       let in_ch = Unix.in_channel_of_descr fd in
       let _ = Marshal.from_channel in_ch in ()
     end
 
-
+  let read_and_execute fd =
+    let in_ch = Unix.in_channel_of_descr fd in
+    let out_ch = Unix.out_channel_of_descr fd in
+    while true do
+      let v = Marshal.from_channel in_ch in
+      match v with
+      | NewChannel -> Marshal.(to_channel out_ch (new_channel ()) [Closures])
+      | Doco (did, l) -> 
+        if Unix.fork () = 0 then begin
+          doco l (); 
+          Marshal.(to_channel out_ch (Finished (did, ())) [Closures])
+        end
+      | Finished (id, x) -> Hashtbl.add docopid_status id (Marshal.to_string x [])
+    done
+  
+  let _ = 
+    Unix.putenv "SERVER" "FALSE";
+    let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+    Unix.(bind fd (ADDR_INET (inet_addr_of_string clientip, comport)));
+    Unix.(listen fd 100);
+    if Unix.fork () = 0 then
+      while true do
+        let fd', saddr = Unix.accept fd in
+        let pid = Unix.fork () in
+        if pid = 0 then 
+          read_and_execute fd'
+        else
+          Queue.push pid children_pids;
+      done
 end
