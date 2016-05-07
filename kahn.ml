@@ -196,3 +196,89 @@ module Seq: S = struct
     List.iter (fun p -> Queue.add (morph p, morph ()) proc_q) l;
     scheduler ()
 end
+
+module Net: S = struct
+  type 'a process = unit -> 'a
+
+  type 'a channel =  { in_ch : Pervasives.in_channel ; out_ch : Pervasives.out_channel }
+  type 'a in_port = { addr : Unix.sockaddr ; mutable in_ch : Pervasives.in_channel option }
+  type 'a out_port = { addr : Unix.sockaddr ; mutable out_ch : Pervasives.out_channel option }
+
+  type 'a query =
+    | NewChannel
+    | Doco of unit process list
+    | Finished of 'a
+
+  let _ = Unix.putenv "SERVER" "FALSE"
+
+  let comport = 42
+  let currport = ref 1 lsl 15
+  let clientip = '129.199.100.19'
+  let servers = ['127.0.0.1']
+
+  let opt_get = function
+    | None -> raise Not_Found
+    | Some x -> x
+
+  let new_channel () =
+    if Unix.getenv "SERVER" = "FALSE" then
+        let addr = Unix.(ADDR_INET ((inet_addr_of_string clientip), !currport)) in
+        incr currport;
+        if Unix.fork () = 0 then begin
+          process_port addr;
+          exit 0;
+        end else
+          { addr = addr; in_ch = None }, { addr = addr; out_ch = None }
+    else begin
+        let fd = Unix.(socket PFINET SOCK_STREAM 0) in
+        Unix.(connect fd (ADDR_INET ((inet_addr_of_string clientip), comport)));
+        let out_ch = Unix.out_channel_of_descr fd in
+        Marshal.to_channel out_ch NewChannel [];
+        let in_ch = Unix.in_channel_of_descr fd in
+        Marshal.from_channel in_ch
+    end
+
+  let rec put v p () =
+    if p.out_ch = None then begin
+      let fd = Unix.(socket PFINET SOCK_STREAM 0) in
+      Unix.connect fd p.addr;
+      let out_ch = Unix.out_channel_of_descr fd in
+      p.out_ch <- Some out_ch
+    end
+      Marshal.to_channel (opt_get p.out_ch) v [Clotures];
+
+  let return v () = v
+
+  let rec bind e e' () =
+    let v = e () in
+    e' v ()
+
+  let run e =
+    if Unix.getenv "SERVER" = "FALSE" then
+        distribute [e]
+    else
+        e ()
+
+  let rec get p () =
+    if p.in_ch = None then begin
+      let fd = Unix.(socket PFINET SOCK_STREAM 0) in
+      Unix.connect fd p.addr;
+      let in_ch = Unix.in_channel_of_descr fd in
+      p.in_ch <- Some in_ch
+    end
+      Marshal.from_channel (opt_get p.in_ch);
+
+  let doco l () =
+    if Unix.getenv "SERVER" = "FALSE" then
+        distribute l
+    else begin
+      let fd = Unix.(socket PFINET SOCK_STREAM 0) in
+      Unix.(connect fd (ADDR_INET ((inet_addr_of_string clientip), comport)));
+      let out_ch = Unix.out_channel_of_descr fd in
+      Marshal.to_channel out_ch (Doco l) [Closures];
+      let in_ch = Unix.in_channel_of_descr fd in
+      let _ = Marshal.from_channel in_ch in ()
+    end
+
+
+end
