@@ -211,7 +211,7 @@ module Net: S = struct
   
   let _ = Random.self_init ()
   let comport = 42
-  let currport = ref (1 lsl 15)
+  let currport = ref (1 lsl 15) (* MUTEX *)
   let clientip = "129.199.100.19"
   let servers = Array.map 
     (fun x -> 
@@ -279,20 +279,27 @@ module Net: S = struct
         end
     else begin
         let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
-        Unix.(connect fd (ADDR_INET (inet_addr_any, comport)));
+        Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
         let out_ch = Unix.out_channel_of_descr fd in
         Marshal.to_channel out_ch NewChannel [];
         let in_ch = Unix.in_channel_of_descr fd in
         Marshal.from_channel in_ch
     end
   
+  let execute docopid x () = 
+    let v = x () in
+    let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+    Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
+    let out_ch = Unix.out_channel_of_descr fd in
+    Marshal.to_channel out_ch (Finished (docopid, v)) []
+
   let distribute l =
     let docopids = Queue.create () in
     List.iteri 
       (fun pos x ->
         Mutex.lock docopid_lock;
         Mutex.lock currsrv_lock;
-        Marshal.(to_channel servers.(!currsrv) (!docopid, x) [Closures]);
+        Marshal.(to_channel servers.(!currsrv) (execute !docopid x) [Closures]);
         Queue.push !docopid docopids;
         incr docopid;
         incr currsrv;
@@ -350,7 +357,7 @@ module Net: S = struct
       let v = assign e in
       kill_all_children ();
       v
-    end else
+    end else 
       e ()
 
   let rec get p () =
@@ -367,7 +374,7 @@ module Net: S = struct
       distribute l
     else begin
       let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
-      Unix.(connect fd (ADDR_INET (inet_addr_any, comport)));
+      Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
       let out_ch = Unix.out_channel_of_descr fd in
       Marshal.(to_channel out_ch (Doco (Random.int (1 lsl 30 - 1), l)) [Closures]); (* Docos should be counted *)
       let in_ch = Unix.in_channel_of_descr fd in

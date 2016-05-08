@@ -5,7 +5,7 @@ TARGET=native
 
 example:
 	$(OCAMLBUILD) example.$(TARGET)
-
+	$(OCAMLBUILD) server.$(TARGET)
 
 clean:
 	$(OCAMLBUILD) -clean
