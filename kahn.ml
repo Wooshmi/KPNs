@@ -267,7 +267,7 @@ module Net: S = struct
 
   let new_channel () =
     if Unix.getenv "SERVER" = "FALSE" then
-        let addr = Unix.(ADDR_INET ((inet_addr_of_string clientip), !currport)) in
+        let addr = Unix.(ADDR_INET (inet_addr_any, !currport)) in
         incr currport;
         let pid = Unix.fork () in
         if pid = 0 then begin
@@ -279,7 +279,7 @@ module Net: S = struct
         end
     else begin
         let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
-        Unix.(connect fd (ADDR_INET ((inet_addr_of_string clientip), comport)));
+        Unix.(connect fd (ADDR_INET (inet_addr_any, comport)));
         let out_ch = Unix.out_channel_of_descr fd in
         Marshal.to_channel out_ch NewChannel [];
         let in_ch = Unix.in_channel_of_descr fd in
@@ -367,7 +367,7 @@ module Net: S = struct
       distribute l
     else begin
       let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
-      Unix.(connect fd (ADDR_INET ((inet_addr_of_string clientip), comport)));
+      Unix.(connect fd (ADDR_INET (inet_addr_any, comport)));
       let out_ch = Unix.out_channel_of_descr fd in
       Marshal.(to_channel out_ch (Doco (Random.int (1 lsl 30 - 1), l)) [Closures]); (* Docos should be counted *)
       let in_ch = Unix.in_channel_of_descr fd in
@@ -392,7 +392,7 @@ module Net: S = struct
   let _ = 
     Unix.putenv "SERVER" "FALSE";
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
-    Unix.(bind fd (ADDR_INET (inet_addr_of_string clientip, comport)));
+    Unix.(bind fd (ADDR_INET (inet_addr_any, comport)));
     Unix.(listen fd 100);
     if Unix.fork () = 0 then
       while true do
