@@ -210,15 +210,12 @@ module Net: S = struct
     | Finished of int * 'a
   
   let _ = Random.self_init ()
-  let comport = 42
+  let comport = 1042
   let currport = ref (1 lsl 15) (* MUTEX *)
-  let clientip = "129.199.100.19"
+  let clientip = "192.168.43.97"
   let servers = Array.map 
-    (fun x -> 
-      let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
-      Unix.(connect fd (ADDR_INET (inet_addr_of_string x, comport)));
-      Unix.out_channel_of_descr fd)
-    [|"127.0.0.1"|]
+    (fun x -> Unix.(ADDR_INET (inet_addr_of_string x, comport)))
+    [|"192.168.43.146"|]
   let currsrv = ref 0
   let currsrv_lock = Mutex.create ()
   let connected = Array.make (1 lsl 15) []
@@ -283,7 +280,9 @@ module Net: S = struct
         let out_ch = Unix.out_channel_of_descr fd in
         Marshal.to_channel out_ch NewChannel [];
         let in_ch = Unix.in_channel_of_descr fd in
-        Marshal.from_channel in_ch
+        let aux = Marshal.from_channel in_ch in
+		Unix.close fd;
+		aux
     end
   
   let execute docopid x () = 
@@ -291,7 +290,8 @@ module Net: S = struct
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
     let out_ch = Unix.out_channel_of_descr fd in
-    Marshal.to_channel out_ch (Finished (docopid, v)) []
+    Marshal.to_channel out_ch (Finished (docopid, v)) [];
+	Unix.close fd
 
   let distribute l =
     let docopids = Queue.create () in
@@ -299,8 +299,12 @@ module Net: S = struct
       (fun pos x ->
         Mutex.lock docopid_lock;
         Mutex.lock currsrv_lock;
-        Marshal.(to_channel servers.(!currsrv) (execute !docopid x) [Closures]);
-        Queue.push !docopid docopids;
+		let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+		Unix.(connect fd servers.(!currsrv));
+		let out_ch = Unix.out_channel_of_descr fd in
+        Marshal.(to_channel out_ch (execute !docopid x) [Closures]);
+        Unix.close fd;
+		Queue.push !docopid docopids;
         incr docopid;
         incr currsrv;
         if !currsrv = Array.length servers then
@@ -321,7 +325,13 @@ module Net: S = struct
     Mutex.lock docopid_lock;
     Mutex.lock currsrv_lock;
     let currdocopid = !docopid in
-    Marshal.(to_channel servers.(!currsrv) (!docopid, x) [Closures]);
+	let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+	Unix.(connect fd servers.(!currsrv));
+	let out_ch = Unix.out_channel_of_descr fd in
+	print_endline "Assign Mashal 1 S";
+	Marshal.(to_channel out_ch (execute !docopid x) [Closures]);
+	print_endline "Assign Mashal 1 E";
+	Unix.close fd;
     incr docopid;
     incr currsrv;
     if !currsrv = Array.length servers then
@@ -378,7 +388,8 @@ module Net: S = struct
       let out_ch = Unix.out_channel_of_descr fd in
       Marshal.(to_channel out_ch (Doco (Random.int (1 lsl 30 - 1), l)) [Closures]); (* Docos should be counted *)
       let in_ch = Unix.in_channel_of_descr fd in
-      let _ = Marshal.from_channel in_ch in ()
+      let _ = Marshal.from_channel in_ch in 
+	  Unix.close fd;
     end
 
   let read_and_execute fd =
