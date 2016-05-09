@@ -351,8 +351,7 @@ module Net: S = struct
         | Queue.Empty -> aux () in
       Marshal.(to_channel out_ch (Marshal.from_string (aux ())) [Closures])
   
-  let init () = 
-    Unix.putenv "SERVER" "FALSE";
+  let init_client () = 
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(bind fd (ADDR_INET (inet_addr_any, comport)));
     Unix.(listen fd 100);
@@ -365,16 +364,45 @@ module Net: S = struct
         end
       done
 
+  let init_server () = 
+    let comport = 1042 in
+    let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+    Unix.(bind fd (ADDR_INET (inet_addr_any, comport)));
+    Unix.listen fd 100;
+    print_endline "Listening...";
+    while true do
+      let fd', _ = Unix.accept fd in
+      print_endline "Connection from Main Server accepted...";
+      if Unix.fork () = 0 then begin
+        let in_ch = Unix.in_channel_of_descr fd' in
+        print_endline "Waiting for data...";
+        let f = Marshal.from_channel in_ch in
+        print_endline "Executing...";
+        f ()
+      end
+    done
+
   let run e =
-    let _ = begin
-      try
-        let _ = Unix.getenv "SERVER" in ()
-      with | Not_found -> init ()
-    end in
-    if Unix.getenv "SERVER" = "FALSE" then begin
-      let v = assign e in
-      kill_all_children ();
-      v
-    end else 
-      e ()
+    try
+      let _ = Unix.getenv "INIT" in
+      if Unix.getenv "SERVER" = "FALSE" then begin
+        let v = assign e in
+        kill_all_children ();
+        v
+      end else 
+        e ()
+    with 
+    | Not_found -> begin
+      Unix.putenv "INIT" "42";
+	    if Unix.getenv "SERVER" = "FALSE" then begin
+        init_client ();
+        let v = assign e in
+        kill_all_children ();
+        v
+      end else begin
+        init_server ();
+        exit 0
+      end
+    end
+
 end
