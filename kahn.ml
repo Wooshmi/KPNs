@@ -200,7 +200,6 @@ module Net: S = struct
     | Put of int * 'a
     | Get of int
 
-  let _ = Random.self_init ()
   let queryport = 1042
   let commport = 1043
   let currch = ref 0
@@ -332,7 +331,7 @@ module Net: S = struct
     flush out_ch;
     let in_ch = Unix.in_channel_of_descr fd in
     let _ = Marshal.from_channel in_ch in
-	  Unix.close fd;
+    Unix.close fd;
     close_out_noerr out_ch;
     close_in_noerr in_ch
 

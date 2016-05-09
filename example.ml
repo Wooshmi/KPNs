@@ -7,7 +7,7 @@ module Example (K : Kahn.S) = struct
     let rec loop n =
       (K.put n qo) >>= (fun () -> loop (n + 1))
     in
-    loop 2
+    loop 1
 
   let output (qi : int K.in_port) : unit K.process =
     let rec loop () =
