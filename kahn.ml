@@ -307,14 +307,6 @@ module Net: S = struct
     let v = e () in
     e' v ()
 
-  let run e =
-    if Unix.getenv "SERVER" = "FALSE" then begin
-      let v = assign e in
-      kill_all_children ();
-      v
-    end else 
-      e ()
-
   let rec get p () =
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
@@ -359,7 +351,7 @@ module Net: S = struct
         | Queue.Empty -> aux () in
       Marshal.(to_channel out_ch (Marshal.from_string (aux ())) [Closures])
   
-  let _ = 
+  let init () = 
     Unix.putenv "SERVER" "FALSE";
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(bind fd (ADDR_INET (inet_addr_any, comport)));
@@ -372,4 +364,17 @@ module Net: S = struct
           exit 0;
         end
       done
+
+  let run e =
+    let _ = begin
+      try
+        let _ = Unix.getenv "SERVER" in ()
+      with | Not_found -> init ()
+    end in
+    if Unix.getenv "SERVER" = "FALSE" then begin
+      let v = assign e in
+      kill_all_children ();
+      v
+    end else 
+      e ()
 end
