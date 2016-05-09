@@ -373,6 +373,7 @@ module Net: S = struct
     Unix.listen fd 100;
     print_endline "Listening...";
     while true do
+      print_endline "Waiting for connections...";
       let fd', _ = Unix.accept fd in
       print_endline "Connection from Main Server accepted...";
       if Unix.fork () = 0 then begin
@@ -380,7 +381,8 @@ module Net: S = struct
         print_endline "Waiting for data...";
         let f = Marshal.from_channel in_ch in
         print_endline "Executing...";
-        f ()
+        f ();
+        print_endline "Finished execution!";
       end
     done
 
