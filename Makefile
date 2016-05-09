@@ -5,7 +5,6 @@ TARGET=byte
 
 example:
 	$(OCAMLBUILD) example.$(TARGET)
-	$(OCAMLBUILD) example_net.$(TARGET)
 
 clean:
 	$(OCAMLBUILD) -clean
