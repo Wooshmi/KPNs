@@ -352,6 +352,7 @@ module Net: S = struct
       Marshal.(to_channel out_ch (Marshal.from_string (aux ())) [Closures])
   
   let init_client () = 
+    Unix.putenv "SERVER" "FALSE";
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(bind fd (ADDR_INET (inet_addr_any, comport)));
     Unix.(listen fd 100);
@@ -365,6 +366,7 @@ module Net: S = struct
       done
 
   let init_server () = 
+    Unix.putenv "SERVER" "TRUE";
     let comport = 1042 in
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(bind fd (ADDR_INET (inet_addr_any, comport)));
@@ -394,7 +396,8 @@ module Net: S = struct
     with 
     | Not_found -> begin
       Unix.putenv "INIT" "42";
-	    if Unix.getenv "SERVER" = "FALSE" then begin
+      let ip = Unix.(string_of_inet_addr ((gethostbyname (gethostname () ^ ".local")).h_addr_list.(0))) in
+	    if ip = clientip then begin
         init_client ();
         let v = assign e in
         kill_all_children ();
@@ -404,5 +407,4 @@ module Net: S = struct
         exit 0
       end
     end
-
 end

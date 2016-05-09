@@ -24,10 +24,6 @@ end
 module E = Example(Kahn.Net)
 
 let () = 
-  if Array.length Sys.argv - 1 = 0 then
-    Unix.putenv "SERVER" "FALSE"
-  else
-    Unix.putenv "SERVER" "TRUE";
   E.K.run E.main
 
 
