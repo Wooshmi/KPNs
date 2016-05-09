@@ -8,14 +8,12 @@ let _ =
   while true do
     let fd', _ = Unix.accept fd in
     print_endline "Connection from Main Server accepted...";
-    if Unix.fork () = 0 then
+    if Unix.fork () = 0 then begin
       let in_ch = Unix.in_channel_of_descr fd' in
-      while true do
-        print_endline "Waiting for data...";
-        let f = Marshal.from_channel in_ch in
-        print_endline "Executing...";
-        if Unix.fork () = 0 then
-          f ()
-      done  
+      print_endline "Waiting for data...";
+      let f = Marshal.from_channel in_ch in
+      print_endline "Executing...";
+      f ()
+    end
   done
 
