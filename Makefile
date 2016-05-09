@@ -1,7 +1,7 @@
 OCAMLBUILD=ocamlbuild -classic-display \
 		-tags annot,debug,thread \
 		-libs unix
-TARGET=native
+TARGET=byte
 
 example:
 	$(OCAMLBUILD) example.$(TARGET)
