@@ -191,50 +191,34 @@ module Net: S = struct
   type 'a in_port = int
   type 'a out_port = int
 
-  type 'a query =
-    | NewChannel
-    | Doco of int * unit process list
-    | Finished of int * 'a
-    | Put of int * 'a
-    | Get of int
-  
   let _ = Random.self_init ()
   let comport = 1042
   let currch = ref 0
-  let currch_lock = Mutex.create ()
+  (*let currch_lock = Mutex.create ()*)
   let clientip = "192.168.0.102"
   let servers = Array.map 
     (fun x -> Unix.(ADDR_INET (inet_addr_of_string x, comport)))
-    [|"192.168.0.101"|]
+    [|"192.168.0.100"|]
   let currsrv = ref 0
-  let currsrv_lock = Mutex.create ()
+  (*let currsrv_lock = Mutex.create ()*)
   let channels = Array.make (1 lsl 15) (Queue.create ())
   let docopid = ref 0
-  let docopid_lock = Mutex.create ()
+  (*let docopid_lock = Mutex.create ()*)
   let docopid_status = Hashtbl.create 1000
   let children_pids = Queue.create ()
 
-  let opt_get = function
-    | None -> raise Not_found
-    | Some x -> x
-
-  let get_port addr =
-    match addr with
-    | Unix.ADDR_INET (_, p) -> p
-    | _ -> assert false
-  
   let new_channel_main () =
-    Mutex.lock currch_lock;
+    (*Mutex.lock currch_lock;*)
     let ch = !currch in
     incr currch;
-    Mutex.unlock currch_lock;
+    (*Mutex.unlock currch_lock;*)
     ch, ch
 
   let new_channel () = 
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
     let out_ch = Unix.out_channel_of_descr fd in
-    Marshal.to_channel out_ch NewChannel [];
+    Marshal.to_channel out_ch ("NewChannel", ((), ())) [];
     let in_ch = Unix.in_channel_of_descr fd in
     let aux = Marshal.from_channel in_ch in
 		Unix.close fd;
@@ -245,15 +229,15 @@ module Net: S = struct
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
     let out_ch = Unix.out_channel_of_descr fd in
-    Marshal.to_channel out_ch (Finished (docopid, v)) [];
+    Marshal.to_channel out_ch ("Finished", (docopid, v)) [];
 	  Unix.close fd
 
   let distribute l =
     let docopids = Queue.create () in
     List.iteri 
       (fun pos x ->
-        Mutex.lock docopid_lock;
-        Mutex.lock currsrv_lock;
+        (*Mutex.lock docopid_lock;
+        Mutex.lock currsrv_lock;*)
 		    let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
 		    Unix.(connect fd servers.(!currsrv));
 		    let out_ch = Unix.out_channel_of_descr fd in
@@ -264,8 +248,8 @@ module Net: S = struct
         incr currsrv;
         if !currsrv = Array.length servers then
           currsrv := 0;
-        Mutex.unlock docopid_lock;
-        Mutex.unlock currsrv_lock)
+        (*Mutex.unlock docopid_lock;
+        Mutex.unlock currsrv_lock*))
       l;
     while not (Queue.is_empty docopids) do
       let x = Queue.pop docopids in
@@ -276,8 +260,8 @@ module Net: S = struct
     done
 
   let assign x =
-    Mutex.lock docopid_lock;
-    Mutex.lock currsrv_lock;
+    (*Mutex.lock docopid_lock;
+    Mutex.lock currsrv_lock;*)
     let currdocopid = !docopid in
 	  let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
 	  Unix.(connect fd servers.(!currsrv));
@@ -290,8 +274,8 @@ module Net: S = struct
     incr currsrv;
     if !currsrv = Array.length servers then
       currsrv := 0;
-    Mutex.unlock docopid_lock;
-    Mutex.unlock currsrv_lock;
+    (*Mutex.unlock docopid_lock;
+    Mutex.unlock currsrv_lock;*)
     while not (Hashtbl.mem docopid_status currdocopid) do
       ()
     done;
@@ -305,7 +289,7 @@ module Net: S = struct
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
     let out_ch = Unix.out_channel_of_descr fd in
-    Marshal.(to_channel out_ch (Put (p, v)) [Closures]);
+    Marshal.(to_channel out_ch ("Put", (p, v)) [Closures]);
     Unix.close fd
 
   let return v () = v
@@ -327,7 +311,7 @@ module Net: S = struct
     Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
     let in_ch = Unix.in_channel_of_descr fd in
     let out_ch = Unix.out_channel_of_descr fd in
-    Marshal.(to_channel out_ch (Get p) []);
+    Marshal.(to_channel out_ch ("Get", (p, ())) []);
     let aux = Marshal.from_channel in_ch in
     Unix.close fd;
     aux
@@ -339,7 +323,7 @@ module Net: S = struct
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, comport)));
     let out_ch = Unix.out_channel_of_descr fd in
-    Marshal.(to_channel out_ch (Doco (Random.int (1 lsl 30 - 1), l)) [Closures]); (* Docos should be counted *)
+    Marshal.(to_channel out_ch ("Doco", (Random.int (1 lsl 30 - 1), l)) [Closures]); (* Docos should be counted *)
     let in_ch = Unix.in_channel_of_descr fd in
     let _ = Marshal.from_channel in_ch in 
 	  Unix.close fd
@@ -347,23 +331,31 @@ module Net: S = struct
   let read_and_execute fd =
     let in_ch = Unix.in_channel_of_descr fd in
     let out_ch = Unix.out_channel_of_descr fd in
-    let v = Marshal.from_channel in_ch in
-    match v with
-    | NewChannel -> Marshal.(to_channel out_ch (new_channel_main ()) [Closures])
-    | Doco (did, l) -> 
+    let (v : string * 'a) = Marshal.from_channel in_ch in
+    match fst v with
+    | "NewChannel" -> 
+      Marshal.(to_channel out_ch (new_channel_main ()) [Closures])
+    | "Doco" -> 
+      let did, l = snd v in
       if Unix.fork () = 0 then begin
         doco_main l (); 
-        Marshal.(to_channel out_ch (Finished (did, ())) [Closures])
+        Marshal.(to_channel out_ch ("Finished", (did, ())) [Closures])
       end
-    | Finished (id, x) -> Hashtbl.add docopid_status id (Marshal.to_string x [])
-    | Put (id, x) -> Queue.push Marshal.(to_string x [Closures]) channels.(id)
-    | Get id -> 
+    | "Finished" -> 
+      let id, x = snd v in 
+      Hashtbl.add docopid_status id (Marshal.to_string x [])
+    | "Put" -> 
+      let id, x = snd v in
+      Queue.push Marshal.(to_string x [Closures]) channels.(id)
+    | "Get" -> 
+      let id, _ = snd v in
       let rec aux () =
         try
           Queue.pop channels.(id)
         with
         | Queue.Empty -> aux () in
       Marshal.(to_channel out_ch (Marshal.from_string (aux ())) [Closures])
+    | _ -> assert false
   
   let _ = 
     Unix.putenv "SERVER" "FALSE";
