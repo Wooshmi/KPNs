@@ -193,7 +193,7 @@ module Net: S = struct
   
   type 'a query = 
     | NewChannel
-    | Doco of int * unit process list
+    | Doco of unit process list
     | Finished of int * 'a
 
   type 'a comm = 
@@ -204,25 +204,20 @@ module Net: S = struct
   let queryport = 1042
   let commport = 1043
   let currch = ref 0
-  (*let currch_lock = Mutex.create ()*)
   let clientip = "192.168.0.100"
   let servers = Array.map 
     (fun x -> Unix.(ADDR_INET (inet_addr_of_string x, queryport)))
     [|"192.168.0.102"|]
   let currsrv = ref 0
-  (*let currsrv_lock = Mutex.create ()*)
   let channel = Array.make (1 lsl 15) (Queue.create ())
   let waiting_on_channel = Array.make (1 lsl 15) (Queue.create ())
   let docopid = ref 0
-  (*let docopid_lock = Mutex.create ()*)
   let docopid_status = Hashtbl.create 1000
   let children_pids = Queue.create ()
 
   let new_channel_main () =
-    (*Mutex.lock currch_lock;*)
     let ch = !currch in
     incr currch;
-    (*Mutex.unlock currch_lock;*)
     ch, ch
 
   let new_channel () = 
@@ -233,7 +228,7 @@ module Net: S = struct
     flush out_ch;
     let in_ch = Unix.in_channel_of_descr fd in
     let aux = Marshal.from_channel in_ch in
-		Unix.close fd;
+    Unix.close fd;
     close_out_noerr out_ch;
     close_in_noerr in_ch;
     aux
@@ -255,22 +250,18 @@ module Net: S = struct
     let docopids = Queue.create () in
     List.iteri 
       (fun pos x ->
-        (*Mutex.lock docopid_lock;
-        Mutex.lock currsrv_lock;*)
-		    let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
-		    Unix.(connect fd servers.(!currsrv));
-		    let out_ch = Unix.out_channel_of_descr fd in
+        let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+        Unix.(connect fd servers.(!currsrv));
+        let out_ch = Unix.out_channel_of_descr fd in
         Marshal.(to_channel out_ch (execute !docopid x) [Closures]);
         flush out_ch;
         Unix.close fd;
         close_out_noerr out_ch;
-		    Queue.push !docopid docopids;
+        Queue.push !docopid docopids;
         incr docopid;
         incr currsrv;
         if !currsrv = Array.length servers then
-          currsrv := 0;
-        (*Mutex.unlock docopid_lock;
-        Mutex.unlock currsrv_lock*))
+          currsrv := 0;)
       l;
     while not (Queue.is_empty docopids) do
       let x = Queue.pop docopids in
@@ -281,22 +272,18 @@ module Net: S = struct
     done
 
   let assign x =
-    (*Mutex.lock docopid_lock;
-    Mutex.lock currsrv_lock;*)
     let currdocopid = !docopid in
-	  let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
-	  Unix.(connect fd servers.(!currsrv));
-	  let out_ch = Unix.out_channel_of_descr fd in
-	  Marshal.(to_channel out_ch (execute !docopid x) [Closures]);
+    let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+    Unix.(connect fd servers.(!currsrv));
+    let out_ch = Unix.out_channel_of_descr fd in
+    Marshal.(to_channel out_ch (execute !docopid x) [Closures]);
     flush out_ch;
-	  Unix.close fd;
+    Unix.close fd;
     close_out_noerr out_ch;
     incr docopid;
     incr currsrv;
     if !currsrv = Array.length servers then
       currsrv := 0;
-    (*Mutex.unlock docopid_lock;
-    Mutex.unlock currsrv_lock;*)
     while not (Hashtbl.mem docopid_status currdocopid) do
       ()
     done;
@@ -341,7 +328,7 @@ module Net: S = struct
     let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
     Unix.(connect fd (ADDR_INET (inet_addr_of_string clientip, queryport)));
     let out_ch = Unix.out_channel_of_descr fd in
-    Marshal.(to_channel out_ch (Doco (Random.int (1 lsl 30 - 1), l)) [Closures]); (* Docos should be counted *)
+    Marshal.(to_channel out_ch (Doco l) [Closures]);
     flush out_ch;
     let in_ch = Unix.in_channel_of_descr fd in
     let _ = Marshal.from_channel in_ch in
@@ -360,9 +347,9 @@ module Net: S = struct
       Unix.close fd;
       close_out_noerr out_ch;
       close_in_noerr in_ch
-    | Doco (did, l) -> 
+    | Doco l -> 
       doco_main l (); 
-      Marshal.(to_channel out_ch (Finished (did, ())) [Closures]);
+      Marshal.(to_channel out_ch () [Closures]); (* doco finish signal *)
       flush out_ch;
       Unix.close fd;
       close_out_noerr out_ch;
@@ -458,7 +445,7 @@ module Net: S = struct
     | Not_found -> begin
       Unix.putenv "INIT" "42";
       let ip = Unix.(string_of_inet_addr ((gethostbyname (gethostname () ^ ".local")).h_addr_list.(0))) in
-	    if ip = clientip then begin
+      if ip = clientip then begin
         init_client ();
         let v = assign e in
         kill_all_children ();
