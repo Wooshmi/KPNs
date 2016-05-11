@@ -13,6 +13,7 @@ module type S = sig
   val bind: 'a process -> ('a -> 'b process) -> 'b process
 
   val run: 'a process -> 'a
+  val run_main: 'a process -> 'a
 end
 
 module Lib (K : S) = struct
@@ -85,6 +86,8 @@ module Th: S = struct
     e' v ()
 
   let run e = e ()
+
+  let run_main = run
 end
 
 module Pipes: S = struct
@@ -123,6 +126,8 @@ module Pipes: S = struct
     e' v ()
 
   let run e = e ()
+
+  let run_main = run
 end
 
 module Seq: S = struct
@@ -182,6 +187,8 @@ module Seq: S = struct
   let doco l f =
     List.iter (fun p -> Queue.add (morph p, morph ()) proc_q) l;
     scheduler ()
+
+  let run_main = run
 end
 
 module Net: S = struct
@@ -454,4 +461,393 @@ module Net: S = struct
         exit 0
       end
     end
+
+  let run_main = run
 end
+
+module NetTh: S = struct
+  type 'a process = unit -> 'a
+  
+  type 'a channel = int
+  type 'a in_port = int
+  type 'a out_port = int
+
+  let statePort = 1041
+  let queryPort = 1042
+  let communicationPort = 1043
+  let mainIP = "192.168.0.100"
+  let serversIPs = [|"192.168.0.102"|]
+  
+  let stateConnectionToMain = ref None (* Used for finish reports *)
+  let queryConnectionToMain = ref None (* Used for queries *)
+  let communicationConnectionToMain = ref None (* Used for communication through channels *)
+
+  let get_option x = 
+    match x with
+    | Some a -> a
+    | _ -> assert false
+  
+  type query =
+    | NewChannel
+    | Doco of string list
+    | Bind of string * string
+
+  type 'a communication =
+    | Put of int * 'a
+    | Get of int
+
+  type order =
+    | Process of string
+    | Binder of string * string
+  
+  let reinit_sockets () =
+    let fd1 = Unix.(socket PF_INET SOCK_STREAM 0) in
+    Unix.(connect fd1 (ADDR_INET (inet_addr_of_string mainIP, statePort)));
+    let in1, out1 = Unix.in_channel_of_descr fd1, Unix.out_channel_of_descr fd1 in
+    stateConnectionToMain := Some (fd1, in1, out1);
+    let fd2 = Unix.(socket PF_INET SOCK_STREAM 0) in
+    Unix.(connect fd2 (ADDR_INET (inet_addr_of_string mainIP, queryPort)));
+    let in2, out2 = Unix.in_channel_of_descr fd2, Unix.out_channel_of_descr fd2 in
+    queryConnectionToMain := Some (fd2, in2, out2);
+    let fd3 = Unix.(socket PF_INET SOCK_STREAM 0) in
+    Unix.(connect fd3 (ADDR_INET (inet_addr_of_string mainIP, communicationPort)));
+    let in3, out3 = Unix.in_channel_of_descr fd3, Unix.out_channel_of_descr fd3 in
+    communicationConnectionToMain := Some (fd3, in3, out3)
+
+  let close_sockets () =
+    let fd, inChannel, outChannel = get_option !stateConnectionToMain in
+    Unix.close fd;
+    close_in_noerr inChannel;
+    close_out_noerr outChannel;
+    let fd, inChannel, outChannel = get_option !queryConnectionToMain in
+    Unix.close fd;
+    close_in_noerr inChannel;
+    close_out_noerr outChannel;
+    let fd, inChannel, outChannel = get_option !communicationConnectionToMain in
+    Unix.close fd;
+    close_in_noerr inChannel;
+    close_out_noerr outChannel
+
+  let execute_process x pid =
+    if Unix.fork () = 0 then begin
+      reinit_sockets ();
+      let v = x () in
+      let _, _, outChannel = get_option !stateConnectionToMain in
+      Marshal.to_channel outChannel (pid, v) [];
+      flush outChannel;
+      close_sockets ();
+      exit 0
+    end
+  
+  let execute_binder x param = execute_process (x param)
+  
+  let new_channel () =
+    let _, inChannel, outChannel = get_option !queryConnectionToMain in
+    Marshal.to_channel outChannel 
+      NewChannel
+      [];
+    flush outChannel;
+    let aux = (Marshal.from_channel inChannel : 'a in_port * 'a out_port) in
+    aux
+
+  let put v p () =
+    let _, _, outChannel = get_option !communicationConnectionToMain in
+    Marshal.to_channel outChannel 
+      (Put (p, v))
+      [];
+    flush outChannel
+  
+  let get p () =
+    let _, inChannel, outChannel = get_option !communicationConnectionToMain in
+    Marshal.to_channel outChannel 
+      (Get p) 
+      [];
+    flush outChannel;
+    Marshal.from_channel inChannel
+
+  let doco l () =
+    let _, inChannel, outChannel = get_option !queryConnectionToMain in
+    let stateConnectionToMainA = !stateConnectionToMain in
+    let queryConnectionToMainA = !queryConnectionToMain in
+    let communicationConnectionToMainA = !communicationConnectionToMain in
+    stateConnectionToMain := None;
+    queryConnectionToMain := None;
+    communicationConnectionToMain := None;
+    Marshal.to_channel outChannel 
+      (Doco (List.map (fun x -> Marshal.(to_string (execute_process x) [Closures])) l))
+      [];
+    flush outChannel;
+    stateConnectionToMain := stateConnectionToMainA;
+    queryConnectionToMain := queryConnectionToMainA;
+    communicationConnectionToMain := communicationConnectionToMainA;
+    let _ = (Marshal.from_channel inChannel : unit) in ()
+
+  let return v () = v
+  
+  let run e = e ()
+
+  let bind e e' () =
+    (*let _, inChannel, outChannel = get_option !queryConnectionToMain in
+    let stateConnectionToMainA = !stateConnectionToMain in
+    let queryConnectionToMainA = !queryConnectionToMain in
+    let communicationConnectionToMainA = !communicationConnectionToMain in
+    stateConnectionToMain := None;
+    queryConnectionToMain := None;
+    communicationConnectionToMain := None;
+    Marshal.to_channel outChannel 
+      (Bind 
+        (Marshal.(to_string (execute_process e) [Closures]), 
+        Marshal.(to_string (execute_binder e') [Closures]))
+      )
+      [];
+    flush outChannel;
+    stateConnectionToMain := stateConnectionToMainA;
+    queryConnectionToMain := queryConnectionToMainA;
+    communicationConnectionToMain := communicationConnectionToMainA;
+    Marshal.from_channel inChannel *) (* Network bind not working yet. *)
+    e' (e ()) ()
+  
+  let get_ip () = 
+    Unix.(string_of_inet_addr (gethostbyname (Unix.gethostname () ^ ".local")).h_addr_list.(0))
+  
+  let server () = 
+    let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+    let myIP = get_ip () in
+    Unix.(bind fd (ADDR_INET (inet_addr_of_string myIP, queryPort)));
+    Unix.listen fd 100;
+    let fd', _ = Unix.accept fd in
+    let inChannel, outChannel = Unix.in_channel_of_descr fd', Unix.out_channel_of_descr fd' in
+    while true do
+      match Marshal.from_channel inChannel with
+      | Process mf ->
+        let id = Marshal.from_channel inChannel in
+        let f = (Marshal.from_string mf 0 : int -> unit) in
+        f id
+      | Binder (mf, mp) ->
+        let id = Marshal.from_channel inChannel in
+        let f = (Marshal.from_string mf 0 : 'a -> int -> unit) in
+        let p = (Marshal.from_string mp 0 : 'a) in
+        f p id
+    done
+
+  let main f = 
+    let myIP = get_ip () in
+
+    (* Processing of processes' states *)
+    let pid = ref 0 in
+    let pLock = Mutex.create () in
+    let pidStatus = Hashtbl.create 1000 in
+    let pSLock = Mutex.create () in
+    let read_and_process_state (fd, inChannel, outChannel) = 
+      try
+        while true do 
+          Thread.yield ();
+          let id, x = (Marshal.from_channel inChannel : int * 'a) in
+          Mutex.lock pSLock;
+          Hashtbl.add pidStatus id (Marshal.to_string x []);
+          Mutex.unlock pSLock;
+        done
+      with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
+    in
+    let main_state () = begin
+      let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+      Unix.(bind fd (ADDR_INET (inet_addr_of_string myIP, statePort)));
+      Unix.listen fd 100;
+      if Unix.fork () = 0 then
+        while true do
+          let fd', _ = Unix.accept fd in
+          let inChannel, outChannel = Unix.in_channel_of_descr fd', Unix.out_channel_of_descr fd' in
+          let _ = Thread.create read_and_process_state (fd', inChannel, outChannel) in ()
+        done
+    end in main_state ();
+    
+    (* Processing of communication through channels *)
+    let currentChannel = ref 0 in
+    let cCLock = Mutex.create () in
+    let maxChannels = 1 lsl 10 in
+    let channel = Array.make maxChannels (Queue.create ()) in
+    let cLock = Array.make maxChannels (Mutex.create ()) in
+    let waitingOnChannel = Array.make maxChannels (Queue.create ()) in
+    let wOCLock = Array.make maxChannels (Mutex.create ()) in
+    let try_pop id = begin
+      Mutex.lock wOCLock.(id);
+      if Queue.is_empty waitingOnChannel.(id) then begin
+        Mutex.unlock wOCLock.(id);
+        false
+      end else begin
+        Mutex.lock cLock.(id);
+        if Queue.is_empty channel.(id) then begin
+          Mutex.unlock wOCLock.(id);
+          Mutex.unlock cLock.(id);
+          false
+        end else begin
+          let (_, inChannel, outChannel) = Queue.pop waitingOnChannel.(id) in
+          output_string outChannel (Queue.pop channel.(id));
+          flush outChannel;
+          Mutex.unlock wOCLock.(id);
+          Mutex.unlock cLock.(id);
+          true
+        end
+      end
+    end in
+    let read_and_process_communication (fd, inChannel, outChannel) =
+      try
+        while true do
+          Thread.yield ();
+          match (Marshal.from_channel inChannel: 'a communication) with
+          | Put (id, x) ->
+            Mutex.lock cLock.(id);
+            Queue.push (Marshal.to_string x []) channel.(id);
+            Mutex.unlock cLock.(id);
+            let _ = try_pop id in ()
+          | Get id ->
+            if try_pop id then
+              ()
+            else begin
+              Mutex.lock wOCLock.(id);
+              Queue.push (fd, inChannel, outChannel) waitingOnChannel.(id);
+              Mutex.unlock wOCLock.(id)
+            end
+        done
+      with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
+    in
+    let main_communication () = begin
+      let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+      Unix.(bind fd (ADDR_INET (inet_addr_of_string myIP, communicationPort)));
+      Unix.listen fd 100;
+      if Unix.fork () = 0 then
+        while true do
+          let fd', _ = Unix.accept fd in
+          let inChannel, outChannel = Unix.in_channel_of_descr fd', Unix.out_channel_of_descr fd' in
+          let _ = Thread.create read_and_process_communication (fd', inChannel, outChannel) in ()
+        done
+    end in main_communication ();
+
+    (* Basic function *)
+    let currentServer = ref 0 in
+    let cSLock = Mutex.create () in
+    let servers = Array.map
+      (fun ip ->
+        let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+        Unix.(connect fd (ADDR_INET (inet_addr_of_string ip, queryPort)));
+        fd, Unix.in_channel_of_descr fd, Unix.out_channel_of_descr fd) serversIPs in
+    let new_channel_main (_, _, outChannel) = begin
+      Mutex.lock cCLock;
+      let ch = !currentChannel in
+      incr currentChannel;
+      Mutex.unlock cCLock;
+      Marshal.to_channel outChannel (ch, ch) [];
+      flush outChannel
+    end in
+    let doco_main ((_, _, outChannel), l) = begin
+      let children = Queue.create () in
+      List.iter
+        (fun x ->
+          Mutex.lock cSLock;
+          Mutex.lock pLock;
+          incr pid;
+          let _, _, outChannel = servers.(!currentServer) in
+          Marshal.to_channel outChannel (Process x) [];
+          Marshal.to_channel outChannel !pid [];
+          flush outChannel;
+          Queue.push !pid children;
+          incr currentServer;
+          if !currentServer = Array.length servers then
+            currentServer := 0;
+          Mutex.unlock cSLock;
+          Mutex.unlock pLock
+        )
+        l;
+      let rec wait () = begin
+        Thread.yield ();
+        if Queue.is_empty children then
+          ()
+        else begin
+          let x = Queue.pop children in
+          Mutex.lock pSLock;
+          if Hashtbl.mem pidStatus x then begin
+            Mutex.unlock pSLock;
+            wait ()
+          end else begin
+            Mutex.unlock pSLock;
+            Queue.push x children
+          end
+        end
+      end in 
+      wait ();
+      Marshal.to_channel outChannel () [];
+      flush outChannel(* Signal that the doco has finished *)
+    end in
+    let assign x = begin
+      Mutex.lock cSLock;
+      Mutex.lock pLock;
+      incr pid;
+      let currentpid = !pid in
+      let _, _, outChannel = servers.(!currentServer) in
+      Marshal.to_channel outChannel x [];
+      Marshal.to_channel outChannel currentpid [];
+      flush outChannel;
+      incr currentServer;
+      if !currentServer = Array.length servers then
+        currentServer := 0;
+      Mutex.unlock cSLock;
+      Mutex.unlock pLock;
+      let rec wait () = begin
+        Thread.yield ();
+        Mutex.lock pSLock;
+        if Hashtbl.mem pidStatus currentpid then begin
+          Mutex.unlock pSLock;
+          Hashtbl.find pidStatus currentpid
+        end else
+          wait ()
+      end in
+      Marshal.from_string (wait ()) 0
+    end in
+    let bind_main ((_, _, outChannel), (e, e')) = begin
+      let v = assign (Process e) in 
+      let h = assign (Binder (e', Marshal.to_string v [])) in
+      Marshal.to_channel outChannel h [];
+      flush outChannel
+    end in
+
+    (* Processing of queries *)
+    let read_and_process_queries (fd, inChannel, outChannel) =
+      try
+        while true do
+          Thread.yield ();
+          match (Marshal.from_channel inChannel : query) with
+          | NewChannel ->
+            new_channel_main (fd, inChannel, outChannel);
+          | Doco l ->
+            doco_main ((fd, inChannel, outChannel), l);
+          | Bind (e, e') ->
+            bind_main ((fd, inChannel, outChannel), (e, e'));
+        done
+      with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
+    in
+    let main_queries () = begin
+      Array.iter (fun x -> let _ = Thread.create read_and_process_queries x in ()) servers;
+      let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
+      Unix.(bind fd (ADDR_INET (inet_addr_of_string myIP, queryPort)));
+      Unix.listen fd 100;
+      if Unix.fork () = 0 then
+        while true do
+          let fd', _ = Unix.accept fd in
+          let inChannel, outChannel = Unix.in_channel_of_descr fd', Unix.out_channel_of_descr fd' in
+          let _ = Thread.create read_and_process_queries (fd', inChannel, outChannel) in ()
+        done
+    end in main_queries ();
+    let assign_first x = begin
+      pid := -1;
+      assign x
+    end in assign_first (Process f)
+
+  let run_main e =
+    if get_ip () = mainIP then
+      main Marshal.(to_string (execute_process e) [Closures])
+    else begin
+      server ();
+      exit 0
+    end
+end
+
