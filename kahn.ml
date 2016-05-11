@@ -490,15 +490,12 @@ module NetTh: S = struct
   type query =
     | NewChannel
     | Doco of string list
-    | Bind of string * string
 
   type 'a communication =
     | Put of int * 'a
     | Get of int
 
-  type order =
-    | Process of string
-    | Binder of string * string
+  type order = string
   
   let reinit_sockets () =
     let fd1 = Unix.(socket PF_INET SOCK_STREAM 0) in
@@ -538,8 +535,6 @@ module NetTh: S = struct
       close_sockets ();
       exit 0
     end
-  
-  let execute_binder x param = execute_process (x param)
   
   let new_channel () =
     let _, inChannel, outChannel = get_option !queryConnectionToMain in
@@ -587,26 +582,8 @@ module NetTh: S = struct
   let run e = e ()
 
   let bind e e' () =
-    (*let _, inChannel, outChannel = get_option !queryConnectionToMain in
-    let stateConnectionToMainA = !stateConnectionToMain in
-    let queryConnectionToMainA = !queryConnectionToMain in
-    let communicationConnectionToMainA = !communicationConnectionToMain in
-    stateConnectionToMain := None;
-    queryConnectionToMain := None;
-    communicationConnectionToMain := None;
-    Marshal.to_channel outChannel 
-      (Bind 
-        (Marshal.(to_string (execute_process e) [Closures]), 
-        Marshal.(to_string (execute_binder e') [Closures]))
-      )
-      [];
-    flush outChannel;
-    stateConnectionToMain := stateConnectionToMainA;
-    queryConnectionToMain := queryConnectionToMainA;
-    communicationConnectionToMain := communicationConnectionToMainA;
-    Marshal.from_channel inChannel *) (* Network bind not working yet. *)
     e' (e ()) ()
-  
+
   let get_ip () = 
     Unix.(string_of_inet_addr (gethostbyname (Unix.gethostname () ^ ".local")).h_addr_list.(0))
   
@@ -618,16 +595,10 @@ module NetTh: S = struct
     let fd', _ = Unix.accept fd in
     let inChannel, outChannel = Unix.in_channel_of_descr fd', Unix.out_channel_of_descr fd' in
     while true do
-      match Marshal.from_channel inChannel with
-      | Process mf ->
-        let id = Marshal.from_channel inChannel in
-        let f = (Marshal.from_string mf 0 : int -> unit) in
-        f id
-      | Binder (mf, mp) ->
-        let id = Marshal.from_channel inChannel in
-        let f = (Marshal.from_string mf 0 : 'a -> int -> unit) in
-        let p = (Marshal.from_string mp 0 : 'a) in
-        f p id
+      let mf = (Marshal.from_channel inChannel : order) in
+      let id = (Marshal.from_channel inChannel : int) in
+      let f = (Marshal.from_string mf 0 : int -> unit) in
+      f id
     done
 
   let main f = 
@@ -747,7 +718,7 @@ module NetTh: S = struct
           Mutex.lock pLock;
           incr pid;
           let _, _, outChannel = servers.(!currentServer) in
-          Marshal.to_channel outChannel (Process x) [];
+          Marshal.to_channel outChannel x [];
           Marshal.to_channel outChannel !pid [];
           flush outChannel;
           Queue.push !pid children;
@@ -776,7 +747,7 @@ module NetTh: S = struct
       end in 
       wait ();
       Marshal.to_channel outChannel () [];
-      flush outChannel(* Signal that the doco has finished *)
+      flush outChannel (* Signal that the doco has finished *)
     end in
     let assign x = begin
       Mutex.lock cSLock;
@@ -803,12 +774,6 @@ module NetTh: S = struct
       end in
       Marshal.from_string (wait ()) 0
     end in
-    let bind_main ((_, _, outChannel), (e, e')) = begin
-      let v = assign (Process e) in 
-      let h = assign (Binder (e', Marshal.to_string v [])) in
-      Marshal.to_channel outChannel h [];
-      flush outChannel
-    end in
 
     (* Processing of queries *)
     let read_and_process_queries (fd, inChannel, outChannel) =
@@ -820,8 +785,6 @@ module NetTh: S = struct
             new_channel_main (fd, inChannel, outChannel);
           | Doco l ->
             doco_main ((fd, inChannel, outChannel), l);
-          | Bind (e, e') ->
-            bind_main ((fd, inChannel, outChannel), (e, e'));
         done
       with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
     in
@@ -840,7 +803,7 @@ module NetTh: S = struct
     let assign_first x = begin
       pid := -1;
       assign x
-    end in assign_first (Process f)
+    end in assign_first f
 
   let run_main e =
     if get_ip () = mainIP then
