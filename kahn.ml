@@ -611,12 +611,27 @@ module NetTh: S = struct
     let pSLock = Mutex.create () in
     let read_and_process_state (fd, inChannel, outChannel) = 
       try
-        while true do 
-          Thread.yield ();
-          let id, x = (Marshal.from_channel inChannel : int * 'a) in
+        while true do
+          let headerSize = Marshal.header_size in
+          let header = Bytes.create headerSize in
+          let headerPos = ref 0 in
+          while !headerPos <> headerSize do
+            headerPos := !headerPos + input inChannel header (!headerPos) (headerSize - !headerPos);
+            Thread.yield ()
+          done;
+          let dataSize = Marshal.data_size header 0 in
+          let data = Bytes.create dataSize in
+          let dataPos = ref 0 in
+          while !dataPos <> dataSize do
+            dataPos := !dataPos + input inChannel data (!dataPos) (dataSize - !dataPos);
+            Thread.yield ()
+          done;
+          let total = Bytes.cat header data in
+          let id, x = (Marshal.from_bytes total 0 : int * 'a) in
           Mutex.lock pSLock;
           Hashtbl.add pidStatus id (Marshal.to_string x []);
           Mutex.unlock pSLock;
+          Thread.yield ()
         done
       with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
     in
@@ -664,8 +679,22 @@ module NetTh: S = struct
     let read_and_process_communication (fd, inChannel, outChannel) =
       try
         while true do
-          Thread.yield ();
-          match (Marshal.from_channel inChannel: 'a communication) with
+          let headerSize = Marshal.header_size in
+          let header = Bytes.create headerSize in
+          let headerPos = ref 0 in
+          while !headerPos <> headerSize do
+            headerPos := !headerPos + input inChannel header (!headerPos) (headerSize - !headerPos);
+            Thread.yield ()
+          done;
+          let dataSize = Marshal.data_size header 0 in
+          let data = Bytes.create dataSize in
+          let dataPos = ref 0 in
+          while !dataPos <> dataSize do
+            dataPos := !dataPos + input inChannel data (!dataPos) (dataSize - !dataPos);
+            Thread.yield ()
+          done;
+          let total = Bytes.cat header data in
+          match (Marshal.from_bytes total 0 : 'a communication) with
           | Put (id, x) ->
             Mutex.lock cLock.(id);
             Queue.push (Marshal.to_string x []) channel.(id);
@@ -678,7 +707,8 @@ module NetTh: S = struct
               Mutex.lock wOCLock.(id);
               Queue.push (fd, inChannel, outChannel) waitingOnChannel.(id);
               Mutex.unlock wOCLock.(id)
-            end
+            end;
+          Thread.yield ()
         done
       with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
     in
@@ -779,12 +809,27 @@ module NetTh: S = struct
     let read_and_process_queries (fd, inChannel, outChannel) =
       try
         while true do
-          Thread.yield ();
-          match (Marshal.from_channel inChannel : query) with
+          let headerSize = Marshal.header_size in
+          let header = Bytes.create headerSize in
+          let headerPos = ref 0 in
+          while !headerPos <> headerSize do
+            headerPos := !headerPos + input inChannel header (!headerPos) (headerSize - !headerPos);
+            Thread.yield ()
+          done;
+          let dataSize = Marshal.data_size header 0 in
+          let data = Bytes.create dataSize in
+          let dataPos = ref 0 in
+          while !dataPos <> dataSize do
+            dataPos := !dataPos + input inChannel data (!dataPos) (dataSize - !dataPos);
+            Thread.yield ()
+          done;
+          let total = Bytes.cat header data in
+          match (Marshal.from_bytes total 0 : query) with
           | NewChannel ->
-            new_channel_main (fd, inChannel, outChannel);
+            new_channel_main (fd, inChannel, outChannel)
           | Doco l ->
             doco_main ((fd, inChannel, outChannel), l);
+          Thread.yield ()
         done
       with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
     in
