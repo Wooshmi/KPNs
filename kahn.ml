@@ -472,14 +472,12 @@ module NetTh: S = struct
   type 'a in_port = int
   type 'a out_port = int
 
-  let statePort = 1041
   let queryPort = 1042
   let communicationPort = 1043
   let mainIP = "192.168.0.100"
   let serversIPs = [|"192.168.0.102"|]
   
-  let stateConnectionToMain = ref None (* Used for finish reports *)
-  let queryConnectionToMain = ref None (* Used for queries *)
+  let queryConnectionToMain = ref None (* Used for queries and state reports *)
   let communicationConnectionToMain = ref None (* Used for communication through channels *)
 
   let get_option x = 
@@ -490,6 +488,7 @@ module NetTh: S = struct
   type query =
     | NewChannel
     | Doco of string list
+    | Finished of int * string
 
   type 'a communication =
     | Put of int * 'a
@@ -499,23 +498,15 @@ module NetTh: S = struct
   
   let reinit_sockets () =
     let fd1 = Unix.(socket PF_INET SOCK_STREAM 0) in
-    Unix.(connect fd1 (ADDR_INET (inet_addr_of_string mainIP, statePort)));
+    Unix.(connect fd1 (ADDR_INET (inet_addr_of_string mainIP, queryPort)));
     let in1, out1 = Unix.in_channel_of_descr fd1, Unix.out_channel_of_descr fd1 in
-    stateConnectionToMain := Some (fd1, in1, out1);
+    queryConnectionToMain := Some (fd1, in1, out1);
     let fd2 = Unix.(socket PF_INET SOCK_STREAM 0) in
-    Unix.(connect fd2 (ADDR_INET (inet_addr_of_string mainIP, queryPort)));
+    Unix.(connect fd2 (ADDR_INET (inet_addr_of_string mainIP, communicationPort)));
     let in2, out2 = Unix.in_channel_of_descr fd2, Unix.out_channel_of_descr fd2 in
-    queryConnectionToMain := Some (fd2, in2, out2);
-    let fd3 = Unix.(socket PF_INET SOCK_STREAM 0) in
-    Unix.(connect fd3 (ADDR_INET (inet_addr_of_string mainIP, communicationPort)));
-    let in3, out3 = Unix.in_channel_of_descr fd3, Unix.out_channel_of_descr fd3 in
-    communicationConnectionToMain := Some (fd3, in3, out3)
+    communicationConnectionToMain := Some (fd2, in2, out2)
 
   let close_sockets () =
-    let fd, inChannel, outChannel = get_option !stateConnectionToMain in
-    Unix.close fd;
-    close_in_noerr inChannel;
-    close_out_noerr outChannel;
     let fd, inChannel, outChannel = get_option !queryConnectionToMain in
     Unix.close fd;
     close_in_noerr inChannel;
@@ -529,8 +520,8 @@ module NetTh: S = struct
     if Unix.fork () = 0 then begin
       reinit_sockets ();
       let v = x () in
-      let _, _, outChannel = get_option !stateConnectionToMain in
-      Marshal.to_channel outChannel (pid, v) [];
+      let _, _, outChannel = get_option !queryConnectionToMain in
+      Marshal.to_channel outChannel (Finished (pid, Marshal.to_string v [])) [];
       flush outChannel;
       close_sockets ();
       exit 0
@@ -562,17 +553,14 @@ module NetTh: S = struct
 
   let doco l () =
     let _, inChannel, outChannel = get_option !queryConnectionToMain in
-    let stateConnectionToMainA = !stateConnectionToMain in
     let queryConnectionToMainA = !queryConnectionToMain in
     let communicationConnectionToMainA = !communicationConnectionToMain in
-    stateConnectionToMain := None;
     queryConnectionToMain := None;
     communicationConnectionToMain := None;
     Marshal.to_channel outChannel 
       (Doco (List.map (fun x -> Marshal.(to_string (execute_process x) [Closures])) l))
       [];
     flush outChannel;
-    stateConnectionToMain := stateConnectionToMainA;
     queryConnectionToMain := queryConnectionToMainA;
     communicationConnectionToMain := communicationConnectionToMainA;
     let _ = (Marshal.from_channel inChannel : unit) in ()
@@ -604,49 +592,12 @@ module NetTh: S = struct
   let main f = 
     let myIP = get_ip () in
 
-    (* Processing of processes' states *)
+    (* Processes' states *)
     let pid = ref 0 in
     let pLock = Mutex.create () in
     let pidStatus = Hashtbl.create 1000 in
     let pSLock = Mutex.create () in
-    let read_and_process_state (fd, inChannel, outChannel) = 
-      try
-        while true do
-          let headerSize = Marshal.header_size in
-          let header = Bytes.create headerSize in
-          let headerPos = ref 0 in
-          while !headerPos <> headerSize do
-            headerPos := !headerPos + input inChannel header (!headerPos) (headerSize - !headerPos);
-            Thread.yield ()
-          done;
-          let dataSize = Marshal.data_size header 0 in
-          let data = Bytes.create dataSize in
-          let dataPos = ref 0 in
-          while !dataPos <> dataSize do
-            dataPos := !dataPos + input inChannel data (!dataPos) (dataSize - !dataPos);
-            Thread.yield ()
-          done;
-          let total = Bytes.cat header data in
-          let id, x = (Marshal.from_bytes total 0 : int * 'a) in
-          Mutex.lock pSLock;
-          Hashtbl.add pidStatus id (Marshal.to_string x []);
-          Mutex.unlock pSLock;
-          Thread.yield ()
-        done
-      with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
-    in
-    let main_state () = begin
-      let fd = Unix.(socket PF_INET SOCK_STREAM 0) in
-      Unix.(bind fd (ADDR_INET (inet_addr_of_string myIP, statePort)));
-      Unix.listen fd 100;
-      if Unix.fork () = 0 then
-        while true do
-          let fd', _ = Unix.accept fd in
-          let inChannel, outChannel = Unix.in_channel_of_descr fd', Unix.out_channel_of_descr fd' in
-          let _ = Thread.create read_and_process_state (fd', inChannel, outChannel) in ()
-        done
-    end in main_state ();
-    
+   
     (* Processing of communication through channels *)
     let currentChannel = ref 0 in
     let cCLock = Mutex.create () in
@@ -805,7 +756,7 @@ module NetTh: S = struct
       Marshal.from_string (wait ()) 0
     end in
 
-    (* Processing of queries *)
+    (* Processing of queries and state reports*)
     let read_and_process_queries (fd, inChannel, outChannel) =
       try
         while true do
@@ -829,6 +780,11 @@ module NetTh: S = struct
             new_channel_main (fd, inChannel, outChannel)
           | Doco l ->
             doco_main ((fd, inChannel, outChannel), l);
+          | Finished (id, v) -> begin
+            Mutex.lock pSLock;
+            Hashtbl.add pidStatus id v;
+            Mutex.unlock pSLock;
+          end;
           Thread.yield ()
         done
       with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
