@@ -317,6 +317,25 @@ module NetTh: S = struct
 
   let main f = 
     let myIP = get_ip () in
+    
+    (* Non-blocking read *)
+    let non_blocking_read (_, inChannel, _) = begin
+      let headerSize = Marshal.header_size in
+      let header = Bytes.create headerSize in
+      let headerPos = ref 0 in
+      while !headerPos <> headerSize do
+        headerPos := !headerPos + input inChannel header (!headerPos) (headerSize - !headerPos);
+        Thread.yield ()
+      done;
+      let dataSize = Marshal.data_size header 0 in
+      let data = Bytes.create dataSize in
+      let dataPos = ref 0 in
+      while !dataPos <> dataSize do
+        dataPos := !dataPos + input inChannel data (!dataPos) (dataSize - !dataPos);
+        Thread.yield ()
+      done;
+      Bytes.cat header data
+    end in
 
     (* Processes' states *)
     let pid = ref 0 in
@@ -357,34 +376,19 @@ module NetTh: S = struct
     let read_and_process_communication (fd, inChannel, outChannel) =
       try
         while true do
-          let headerSize = Marshal.header_size in
-          let header = Bytes.create headerSize in
-          let headerPos = ref 0 in
-          while !headerPos <> headerSize do
-            headerPos := !headerPos + input inChannel header (!headerPos) (headerSize - !headerPos);
-            Thread.yield ()
-          done;
-          let dataSize = Marshal.data_size header 0 in
-          let data = Bytes.create dataSize in
-          let dataPos = ref 0 in
-          while !dataPos <> dataSize do
-            dataPos := !dataPos + input inChannel data (!dataPos) (dataSize - !dataPos);
-            Thread.yield ()
-          done;
-          let total = Bytes.cat header data in
-          match (Marshal.from_bytes total 0 : 'a communication) with
+          let buf = non_blocking_read (fd, inChannel, outChannel) in
+          match (Marshal.from_bytes buf 0 : 'a communication) with
           | Put (id, x) ->
             Mutex.lock cLock.(id);
             Queue.push (Marshal.to_string x []) channel.(id);
             Mutex.unlock cLock.(id);
-            let _ = try_pop id in ()
+            let _ = try_pop id in Thread.yield ()
           | Get id -> begin
             Mutex.lock wOCLock.(id);
             Queue.push (fd, inChannel, outChannel) waitingOnChannel.(id);
             Mutex.unlock wOCLock.(id);
             let _ = try_pop id in ()
-          end;
-          Thread.yield ()
+          end
         done
       with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
     in
@@ -485,22 +489,8 @@ module NetTh: S = struct
     let read_and_process_queries (fd, inChannel, outChannel) =
       try
         while true do
-          let headerSize = Marshal.header_size in
-          let header = Bytes.create headerSize in
-          let headerPos = ref 0 in
-          while !headerPos <> headerSize do
-            headerPos := !headerPos + input inChannel header (!headerPos) (headerSize - !headerPos);
-            Thread.yield ()
-          done;
-          let dataSize = Marshal.data_size header 0 in
-          let data = Bytes.create dataSize in
-          let dataPos = ref 0 in
-          while !dataPos <> dataSize do
-            dataPos := !dataPos + input inChannel data (!dataPos) (dataSize - !dataPos);
-            Thread.yield ()
-          done;
-          let total = Bytes.cat header data in
-          match (Marshal.from_bytes total 0 : query) with
+          let buf = non_blocking_read (fd, inChannel, outChannel) in
+          match (Marshal.from_bytes buf 0 : query) with
           | NewChannel ->
             new_channel_main (fd, inChannel, outChannel)
           | Doco l ->
