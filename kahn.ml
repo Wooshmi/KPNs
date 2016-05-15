@@ -335,6 +335,7 @@ module NetTh: S = struct
         Thread.yield ()
       done;
       Bytes.cat header data
+ 
     end in
 
     (* Processes' states *)
@@ -375,8 +376,29 @@ module NetTh: S = struct
     end in
     let read_and_process_communication (fd, inChannel, outChannel) =
       try
+        let jokers = ref 50 in
         while true do
-          let buf = non_blocking_read (fd, inChannel, outChannel) in
+          let headerSize = Marshal.header_size in
+          let header = Bytes.create headerSize in
+          let headerPos = ref 0 in
+          while !headerPos <> headerSize do
+            headerPos := !headerPos + input inChannel header (!headerPos) (headerSize - !headerPos);
+            if !jokers = 0 then
+              Thread.yield ()
+            else
+              decr jokers
+          done;
+          let dataSize = Marshal.data_size header 0 in
+          let data = Bytes.create dataSize in
+          let dataPos = ref 0 in
+          while !dataPos <> dataSize do
+            dataPos := !dataPos + input inChannel data (!dataPos) (dataSize - !dataPos);
+            if !jokers = 0 then
+              Thread.yield ()
+            else
+              decr jokers
+          done;
+          let buf = Bytes.cat header data in
           match (Marshal.from_bytes buf 0 : 'a communication) with
           | Put (id, x) ->
             Mutex.lock cLock.(id);
@@ -387,7 +409,10 @@ module NetTh: S = struct
             Mutex.lock wOCLock.(id);
             Queue.push (fd, inChannel, outChannel) waitingOnChannel.(id);
             Mutex.unlock wOCLock.(id);
-            let _ = try_pop id in ()
+            if try_pop id then
+              jokers := !jokers + 50
+            else
+              ()
           end
         done
       with | End_of_file -> Unix.close fd; close_in_noerr inChannel; close_out_noerr outChannel
