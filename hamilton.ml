@@ -11,12 +11,11 @@ module Hamilton (K : Kahn.S) = struct
   type graph = ISet.t array
 
   let read_graph () =
-    let fl = Str.(split_delim (regexp " ") (read_line())) in
-    let n = int_of_string (List.hd fl) in
+    let n = read_int() in
     let g = Array.make n ISet.empty in
     for edge = 0 to n-1 do
       let l = Str.(split_delim (regexp " ") (read_line())) in
-      let neighbours = List.map (fun s -> int_of_string s) (List.tl l) in
+      let neighbours = List.map int_of_string l in
       g.(edge) <- ISet.of_list neighbours
     done;
     g
