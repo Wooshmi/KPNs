@@ -141,16 +141,13 @@ module Seq: S = struct
   let proc_q = Queue.create ()
   let sch_state = ref false
 
-  (* Not the most elegant solution *)
-  let morph v = Obj.magic v (* Let me show you a magic trick... *)
-
   let rec scheduler () =
     if !sch_state then (* No more than one scheduler "running" at a time *)
       ()
     else begin
       sch_state := true;
       while not (Queue.is_empty proc_q) do
-        let p, param = Queue.pop proc_q in p param
+        let f = Queue.pop proc_q in f ()
       done;
       sch_state := false
     end
@@ -161,15 +158,15 @@ module Seq: S = struct
 
   let rec put v c f =
     Queue.push v c;
-    Queue.push (morph f, morph ()) proc_q;
+    Queue.push (fun () -> let _ = f () in ()) proc_q;
     scheduler ()
 
   let return v f =
-    Queue.push (morph f, morph v) proc_q;
+    Queue.push (fun () -> let _ = f v in ()) proc_q;
     scheduler ()
 
   let rec bind e e' f =
-    e (fun f' -> Queue.push (morph (e' f'), morph f) proc_q; scheduler ())
+    e (fun f' -> Queue.push (fun () -> let _ = (e' f') f in ()) proc_q; scheduler ())
 
   let run e =
     let res = ref None in
@@ -180,12 +177,13 @@ module Seq: S = struct
 
   let rec get c f =
     if not (Queue.is_empty c) then
-      let v = Queue.pop c in Queue.push (morph f, morph v) proc_q
-    else Queue.push (morph (get c), morph f) proc_q;
+      let v = Queue.pop c in Queue.push (fun () -> let _ = f v in ()) proc_q
+    else 
+      Queue.push (fun () -> let _ = get c f in ()) proc_q;
     scheduler ()
 
   let doco l f =
-    List.iter (fun p -> Queue.add (morph p, morph ()) proc_q) l;
+    List.iter (fun p -> Queue.add (fun () -> let _ = p f in ()) proc_q) l;
     scheduler ()
 
   let run_main = run
@@ -200,8 +198,8 @@ module NetTh: S = struct
 
   let queryPort = 1042
   let communicationPort = 1043
-  let mainIP = "192.168.0.100"
-  let serversIPs = [|"192.168.0.102"|]
+  let mainIP = "192.168.43.146"
+  let serversIPs = [|"192.168.43.97"|]
   
   let queryConnectionToMain = ref None (* Used for queries and state reports *)
   let communicationConnectionToMain = ref None (* Used for communication through channels *)
@@ -335,7 +333,6 @@ module NetTh: S = struct
         Thread.yield ()
       done;
       Bytes.cat header data
- 
     end in
 
     (* Processes' states *)
