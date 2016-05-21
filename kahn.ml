@@ -215,8 +215,8 @@ module NetTh: S = struct
     | Finished of int * string
 
   type 'a communication =
-    | Put of int * 'a
-    | Get of int
+    | Put of 'a out_port * 'a
+    | Get of 'a in_port
 
   type order = string
   
