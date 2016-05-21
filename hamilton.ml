@@ -10,11 +10,23 @@ module Hamilton (K : Kahn.S) = struct
 
   type graph = ISet.t array
 
-  let g = [|ISet.of_list [1;2;3] ; ISet.of_list [0;3] ; ISet.of_list [0;3] ; ISet.of_list [0;1;2]|]
+  let read_graph () =
+    let fl = Str.(split_delim (regexp " ") (read_line())) in
+    let n = int_of_string (List.hd fl) in
+    let g = Array.make n ISet.empty in
+    for edge = 0 to n-1 do
+      let l = Str.(split_delim (regexp " ") (read_line())) in
+      let neighbours = List.map (fun s -> int_of_string s) (List.tl l) in
+      g.(edge) <- ISet.of_list neighbours
+    done;
+    g
+
+  let g = read_graph ()
 
   let explore (qo : int list K.out_port) : unit K.process =
+    let st = 0 in
     let rec aux n s l = begin
-      if ISet.cardinal s = Array.length g then
+      if ISet.cardinal s = Array.length g && ISet.mem st g.(n) then
         K.put l qo
       else (
         let to_explore = ISet.diff g.(n) s in
@@ -22,11 +34,11 @@ module Hamilton (K : Kahn.S) = struct
         K.doco (List.map (fun x -> aux x (ISet.add x s) (x::l)) to_do)
       )
     end
-    in aux 0 (ISet.singleton 0) [0]
+    in aux st (ISet.singleton st) [st]
 
 
   let output (qi : int list K.in_port) : unit K.process =
-    (K.get qi) >>= (fun v -> List.iter (fun x -> Format.printf "%d " x) (List.rev v); K.doco [])
+    (K.get qi) >>= (fun v -> List.iter (fun x -> Format.printf "%d " x) (List.rev v); Format.printf "\n"; K.doco [])
 
   let main : unit K.process =
     (delay K.new_channel ()) >>=
