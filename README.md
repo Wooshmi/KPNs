@@ -3,8 +3,8 @@
 If you want to delete the files created by `make`, you can use:  
 `make clean`  
 If you want to write your own example `my_example.ml`, inspire yourself from our demo sources (`automata.ml`, `example.ml`, `graph.ml`), and compile it using:  
-`ocamlbuild my_example.byte -libs unix,str -tags thread`  
-You can also compile it to native. However, native files won't work when using the network implementation because of Marshalling.  
+`ocamlbuild my_example.byte -libs unix -tags thread`  
+You can also compile it to native. However, native files won't work when using the network implementation because of Marshaling.  
 # *KPNs*
 ## KPN implementation using Unix Pipes
 Unix Pipes are used as channels in this implementation.  
@@ -14,9 +14,9 @@ type 'a channel = {
     out_ch : Pervasives.out_channel
 }
 ``` 
-In a doco we execute each process on its own OS process (with `fork`) and at the end we wait by using `waitpid` on all child processes.
+In a doco we execute each process on its own OS process (with `fork`) and we wait by using `waitpid` on all child processes related to the current doco.
 ## Sequential KPN implementation
-In this implementation we have used a queue for each channel
+In this implementation we have used a queue for each channel.  
 ```ocaml
 type 'a channel = 'a Queue.t
 ```  
@@ -24,21 +24,21 @@ We have also modified the process type to simulate CPS (continuation-passing sty
 ```ocaml
 type 'a process = ('a -> unit) -> unit
 ```  
-We have a global queue for processes that need to be executed. There's a scheduler that sequentially execute the processes in the queue until the queue becomes empty. In order to prevent `Segmentation faults`, we had to limit the total number of schedulers running at a given time to 1.  
+We have a global queue for processes that need to be executed. There's a scheduler that sequentially execute the processes in the queue until the queue becomes empty. We have at most one scheduler running at any given time.  
 Our implementation is inspired by "A poor man’s concurrency monad, Koen Classen, 1999". However `run` was implemented differently: we used a reference to save the value returned by the process that was executed.
 ```ocaml
     let res = ref None in 
     bind e (fun x -> res := Some x; (fun f -> f ()) (fun () -> ())
 ```
 ## Network KPN implementation
-In order to use this implementation, you'll need at least 2 computers. One of the computers will act as a main server, and the others will be the workers. *This implementation only works on LAN connections. Make sure that the ports 1042 and 1043 are opened.*   
+In order to use this implementation, you'll need at least 2 computers. One of the computers will act as main server, and the others will be workers. *This implementation only works on LAN connections. Make sure that the ports 1042 and 1043 are opened locally.*   
 Before compiling, you'll need to modify the module code by filling in the following variables: `mainIP` (line 201) and `serversIPs` (line 202).  
 The port 1042 is used for queries. The query type is the following:  
 ```ocaml
 type query = 
 | NewChannel (* Ask the main server to create a new channel. *)
 | Doco of string list (* Ask the main server to distribute a doco. *)
-| Finished of int * string (* Signal the main server the id and the return value of a finished process *)
+| Finished of int * string (* Signal the main server the id and return value of a finished process. *)
 ```
 The port 1043 is used for communication. The communication type is the following:
 ```ocaml
@@ -51,7 +51,7 @@ type 'a communication =
 The data that passes through these 2 ports is completely independent and thus we can have an OS process for each of the ports. On each of these OS processes we will create a thread per incoming connection.  
 We had to add one more function to the given signature (`run_main`) which is used for initialisation and should be called only once (it replaces the first run).
 ### Optimisations
-We've implemented a mini priority system for OCaml threads. The issue that motivated us to do this was the fact that `get` commands block the execution of a specific process until it receives the answer. We use jokers to reduce the interruption of communication threads that read a `get`.  All communication processes start with 50 jokers and receive 50 jokers whenever they succesfully read a get request. However they lose 1 joker every time they skips a thread yield. If the number of jokers of a thread reaches 0 then all thread yield are executed.
+We've implemented a mini priority system for OCaml threads. The issue that motivated us to do this was the fact that `get` commands block the execution of a specific process until it receives the answer. We use jokers to reduce the interruption of communication threads that read a `get`.  All communication processes start with 50 jokers and receive 50 jokers whenever they succesfully read a get request. However they lose 1 joker every time they skip a thread yield. If the number of jokers of a thread reaches 0 then all thread yield are executed.
 ```ocaml
 if !jokers = 0 then
     Thread.yield ()
