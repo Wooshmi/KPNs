@@ -136,6 +136,10 @@ module Seq: S = struct
   type 'a channel = 'a Queue.t
   type 'a in_port = 'a channel
   type 'a out_port = 'a channel
+  
+  (* Process management *)
+  let pid = ref 0
+  let pidStatus = Hashtbl.create 1000
 
   (* Queue for the processes *)
   let proc_q = Queue.create ()
@@ -182,8 +186,22 @@ module Seq: S = struct
       Queue.push (fun () -> let _ = get c f in ()) proc_q;
     scheduler ()
 
+  let rec doco_finish q f =
+    let n = Queue.length q in
+    for i = 1 to n do
+      let x = Queue.pop q in
+      if not (Hashtbl.mem pidStatus x) then
+        Queue.push x q
+    done;
+    if not (Queue.is_empty q) then
+      Queue.push (fun () -> doco_finish q f) proc_q
+    else
+      Queue.push (fun () -> f ()) proc_q
+
   let doco l f =
-    List.iter (fun p -> Queue.add (fun () -> let _ = p f in ()) proc_q) l;
+    let q = Queue.create () in
+    List.iter (fun p -> let aux = !pid in Queue.add (fun () -> p (fun () -> Hashtbl.add pidStatus aux true)) proc_q; Queue.push aux q; incr pid) l;
+    Queue.add (fun () -> doco_finish q f) proc_q;
     scheduler ()
 
   let run_main = run
