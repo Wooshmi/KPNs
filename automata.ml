@@ -80,4 +80,4 @@ end
 
 module E = Automata(Kahn.Th)
 
-let () = E.K.run_main E.main
+let () = E.K.run E.main

@@ -13,7 +13,6 @@ module type S = sig
   val bind: 'a process -> ('a -> 'b process) -> 'b process
 
   val run: 'a process -> 'a
-  val run_main: 'a process -> 'a
 end
 
 module Lib (K : S) = struct
@@ -86,8 +85,6 @@ module Th: S = struct
     e' v ()
 
   let run e = e ()
-
-  let run_main = run
 end
 
 module Pipes: S = struct
@@ -126,8 +123,6 @@ module Pipes: S = struct
     e' v ()
 
   let run e = e ()
-
-  let run_main = run
 end
 
 module Seq: S = struct
@@ -203,8 +198,6 @@ module Seq: S = struct
     List.iter (fun p -> let aux = !pid in Queue.add (fun () -> p (fun () -> Hashtbl.add pidStatus aux true)) proc_q; Queue.push aux q; incr pid) l;
     Queue.add (fun () -> doco_finish q f) proc_q;
     scheduler ()
-
-  let run_main = run
 end
 
 module NetTh: S = struct
@@ -308,8 +301,6 @@ module NetTh: S = struct
     let _ = (Marshal.from_channel inChannel : unit) in ()
 
   let return v () = v
-  
-  let run e = e ()
 
   let bind e e' () =
     e' (e ()) ()
@@ -561,13 +552,20 @@ module NetTh: S = struct
     let _ = Unix.wait () in
     let _ = Unix.wait () in
     exit 0
-
+  
   let run_main e =
+    Unix.putenv "INIT" "TRUE";
     if get_ip () = mainIP then
       main Marshal.(to_string (execute_process e) [Closures])
     else begin
       server ();
       exit 0
     end
+
+  let run e =
+    try
+      let _ = Unix.getenv "INIT" in e ()
+    with
+    | Not_found -> run_main e
 end
 

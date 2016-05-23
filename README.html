@@ -43,9 +43,8 @@ The port 1042 is used for queries. The query type is the following:</p>
 | <span class="hljs-type">Put</span> <span class="hljs-keyword">of</span> <span class="hljs-symbol">'a</span> out_port * <span class="hljs-symbol">'a</span> <span class="hljs-comment">(* Ask the main server to put a value on a specific channel *)</span>
 | <span class="hljs-type">Get</span> <span class="hljs-keyword">of</span> <span class="hljs-symbol">'a</span> in_port <span class="hljs-comment">(* Ask the main server to get a value from a specific channel and send it to you *)</span> 
 </code></pre>
-<p>The data that passes through these 2 ports is completely independent and thus we can have an OS process for each of the ports. On each of these OS processes we will create a thread per incoming connection.<br>
-We had to add one more function to the given signature (<code>run_main</code>) which is used for initialisation and should be called only once (it replaces the first run).</p>
-<h3><a id="Optimisations_52"></a>Optimisations</h3>
+<p>The data that passes through these 2 ports is completely independent and thus we can have an OS process for each of the ports. On each of these OS processes we will create a thread per incoming connection.</p>
+<h3><a id="Optimisations_51"></a>Optimisations</h3>
 <p>We’ve implemented a mini priority system for OCaml threads. The issue that motivated us to do this was the fact that <code>get</code> commands block the execution of a specific process until it receives the answer. We use jokers to reduce the interruption of communication threads that read a <code>get</code>.  All communication processes start with 50 jokers and receive 50 jokers whenever they succesfully read a get request. However they lose 1 joker every time they skip a thread yield. If the number of jokers of a thread reaches 0 then all thread yield are executed.</p>
 <pre><code class="language-ocaml">    <span class="hljs-keyword">if</span> !jokers = <span class="hljs-number">0</span> <span class="hljs-keyword">then</span>
         <span class="hljs-type">Thread</span>.yield <span class="hljs-literal">()</span>
@@ -60,22 +59,22 @@ We had to add one more function to the given signature (<code>run_main</code>) w
         <span class="hljs-type">Thread</span>.yield <span class="hljs-literal">()</span>
     <span class="hljs-keyword">done</span>
 </code></pre>
-<h1><a id="Examples_69"></a><em>Examples</em></h1>
-<p>The ideas are simple: whenever we are faced with multiple possibilities we explore all of them with a doco.</p>
-<h2><a id="Hamiltonian_Cycle_Detector_71"></a>Hamiltonian Cycle Detector</h2>
+<h1><a id="Examples_68"></a><em>Examples</em></h1>
+<p>The idea is simple: whenever we are faced with multiple possibilities we explore all of them with a doco.</p>
+<h2><a id="Hamiltonian_Cycle_Detector_70"></a>Hamiltonian Cycle Detector</h2>
 <p>You can execute it on the sample tests with the following commands:<br>
 <code>./hamilton.byte &lt; tests/graph.in</code><br>
-<code>./hamilton.byte &lt; tests/graph_neg.in</code><br>
-The input format is the following:</p>
+<code>./hamilton.byte &lt; tests/graph_neg.in</code></p>
+<p>The input format is the following:</p>
 <ul>
 <li>On the first line: <code>nbNodes</code> - the number of nodes</li>
 <li>On line n (starting at 0): the neighbours of node (n - 1) separated by spaces</li>
 </ul>
 <h2><a id="Nondeterministic_Automata_Simulator_2016_79"></a>Non-deterministic Automata Simulator “2016”</h2>
 <p>You can execute it on the sample tests with the following commands:<br>
-<code>./automata.byte &lt; tests/automata.in</code><br>
-<code>./automata.byte &lt; tests/automata_neg.in</code><br>
-The input format is the following:</p>
+<code>./automata.byte &lt; tests/automaton.in</code><br>
+<code>./automata.byte &lt; tests/automaton_neg.in</code></p>
+<p>The input format is the following:</p>
 <ul>
 <li>On the first line: <code>nbStates</code> - the number of states followed by <code>nbTransitions</code> - the number of transitions</li>
 <li>On the second line: the starting states separated by spaces</li>
