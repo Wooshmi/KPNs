@@ -53,10 +53,10 @@ We had to add one more function to the given signature (`run_main`) which is use
 ### Optimisations
 We've implemented a mini priority system for OCaml threads. The issue that motivated us to do this was the fact that `get` commands block the execution of a specific process until it receives the answer. We use jokers to reduce the interruption of communication threads that read a `get`.  All communication processes start with 50 jokers and receive 50 jokers whenever they succesfully read a get request. However they lose 1 joker every time they skip a thread yield. If the number of jokers of a thread reaches 0 then all thread yield are executed.
 ```ocaml
-if !jokers = 0 then
-    Thread.yield ()
-else
-    decr jokers
+    if !jokers = 0 then
+        Thread.yield ()
+    else
+        decr jokers
 ```  
 We've also implemented a lock-free read. Let's suppose that we want to read `size` characters from `inChannel`. We are going to take advantage of the `input` function of the Pervasives module which only reads the available characters.
 ```ocaml
@@ -70,7 +70,7 @@ We've also implemented a lock-free read. Let's suppose that we want to read `siz
 # *Examples*
 The ideas are simple: whenever we are faced with multiple possibilities we explore all of them with a doco.
 ## Hamiltonian Cycle Detector
-You can execute it on the sample test with the following command:  
+You can execute it on the sample tests with the following commands:  
 `./hamilton.byte < tests/graph.in`  
 `./hamilton.byte < tests/graph_neg.in`  
 The input format is the following:
@@ -78,7 +78,7 @@ The input format is the following:
 - On line n (starting at 0): the neighbours of node (n - 1) separated by spaces  
 
 ## Non-deterministic Automata Simulator "2016"
-You can execute it on the sample test with the following command:  
+You can execute it on the sample tests with the following commands:  
 `./automata.byte < tests/automata.in`  
 `./automata.byte < tests/automata_neg.in`  
 The input format is the following:
