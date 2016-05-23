@@ -33,11 +33,18 @@ module Hamilton (K : Kahn.S) = struct
         K.doco (List.map (fun x -> aux x (ISet.add x s) (x::l)) to_do)
       )
     end
-    in aux st (ISet.singleton st) [st]
-
+    in 
+    (aux st (ISet.singleton st) [st]) >>= (fun _ -> K.put [] qo)
 
   let output (qi : int list K.in_port) : unit K.process =
-    (K.get qi) >>= (fun v -> List.iter (fun x -> Format.printf "%d " x) (List.rev v); Format.printf "\n"; K.doco [])
+    (K.get qi) >>= 
+      (fun v -> 
+        if v = [] then
+          Format.printf "No Hamiltonian cycle." 
+        else
+          List.iter (fun x -> Format.printf "%d " x) (List.rev v);
+        Format.printf "\n"; 
+        K.doco [])
 
   let main : unit K.process =
     (delay K.new_channel ()) >>=

@@ -61,10 +61,16 @@ module Automata (K : Kahn.S) = struct
     end
     in
     let to_do = ISet.fold (fun x ls -> x::ls) a.start [] in
-    K.doco (List.map (fun x -> aux x 0) to_do)
+    (K.doco (List.map (fun x -> aux x 0) to_do)) >>= (fun _ -> K.put false qo)
 
   let output (qi : bool K.in_port) : unit K.process =
-    (K.get qi) >>= (fun _ -> Format.printf "OK\n"; K.doco [])
+    (K.get qi) >>= 
+      (fun b -> 
+        if b then
+          Format.printf "YES\n"
+        else
+          Format.printf "NO\n";
+        K.doco [])
 
   let main : unit K.process =
     (delay K.new_channel ()) >>=
@@ -72,6 +78,6 @@ module Automata (K : Kahn.S) = struct
 
 end
 
-module E = Automata(Kahn.Seq)
+module E = Automata(Kahn.Th)
 
 let () = E.K.run_main E.main

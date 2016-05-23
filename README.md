@@ -68,18 +68,19 @@ We've also implemented a lock-free read. Let's suppose that we want to read `siz
     done
 ```
 # *Examples*
-Both examples are "over-optimistic" because there's a process that waits for an affirmative answer. If this answer never arrives, the process keeps on waiting... This means that we can never know if the answer is negative or if the program is still running. However if the answer is positive, we will see it as soon as a solution is found.  
 The ideas are simple: whenever we are faced with multiple possibilities we explore all of them with a doco.
-## "Over-optimistic Hamiltonian Cycle Detector - Server edition"
+## Hamiltonian Cycle Detector
 You can execute it on the sample test with the following command:  
 `./hamilton.byte < tests/graph.in`  
+`./hamilton.byte < tests/graph_neg.in`  
 The input format is the following:
 - On the first line: `nbNodes` - the number of nodes
 - On line n (starting at 0): the neighbours of node (n - 1) separated by spaces  
 
-## "Over-optimistic Non-deterministic Automata Simulator 2016"
+## Non-deterministic Automata Simulator "2016"
 You can execute it on the sample test with the following command:  
 `./automata.byte < tests/automata.in`  
+`./automata.byte < tests/automata_neg.in`  
 The input format is the following:
 - On the first line: `nbStates` - the number of states followed by `nbTransitions` - the number of transitions
 - On the second line: the starting states separated by spaces
